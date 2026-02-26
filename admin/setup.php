@@ -301,7 +301,7 @@ if (preg_match('/call'.$prefix.'HEALTHCHECK/i', $action, $reg)) {
 	if ($statusPDP['status_code'] == 200) {
 		setEventMessages($statusPDP['message'], null, 'mesgs');
 	} else {
-		setEventMessages($langs->trans('PdpApiNotReachable'), array(), 'errors');
+		setEventMessages($langs->trans('APApiNotReachable', $PDPManager->getProvider(getDolGlobalString('PDPCONNECTFR_PDP'))), array(), 'errors');
 	}
 }
 
@@ -388,6 +388,7 @@ if (getDolGlobalString('PDPCONNECTFR_PDP') && getDolGlobalString('PDPCONNECTFR_P
 	// ROUTING ID
 	$item = $formSetup->newItem($prefix . 'ROUTING_ID');
 	$item->helpText = $langs->transnoentities($prefix . 'ROUTING_ID_HELP');
+	$item->fieldParams['isMandatory'] = 1;
 	$item->cssClass = 'minwidth500';
 
 	// To remove

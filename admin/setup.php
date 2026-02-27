@@ -64,11 +64,13 @@ if (!$res) {
  * @var Conf $conf
  * @var DoliDB $db
  * @var HookManager $hookmanager
+ * @var Societe $mysoc
  * @var Translate $langs
  * @var User $user
  */
 // Libraries
 require_once DOL_DOCUMENT_ROOT."/core/lib/admin.lib.php";
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formsetup.class.php';
 require_once '../lib/pdpconnectfr.lib.php';
 require_once "../class/providers/PDPProviderManager.class.php";
 require_once "../class/protocols/ProtocolManager.class.php";
@@ -95,105 +97,14 @@ $type = 'myobject';
 $error = 0;
 $setupnotempty = 0;
 
-// Access control
-if (!$user->admin) {
-	accessforbidden();
-}
-
-
-// Set this to 1 to use the factory to manage constants. Warning, the generated module will be compatible with version v15+ only
-$useFormSetup = 1;
-
-if (!class_exists('FormSetup')) {
-	require_once DOL_DOCUMENT_ROOT.'/core/class/html.formsetup.class.php';
-}
 $formSetup = new FormSetup($db);
+$formSetup2 = new FormSetup($db);
 
 // Access control
 if (!$user->admin) {
 	accessforbidden();
 }
 
-
-// Enter here all parameters in your setup page
-/*
-// Setup conf for selection of an URL
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM1');
-$item->fieldParams['isMandatory'] = 1;
-$item->fieldAttr['placeholder'] = (empty($_SERVER['HTTPS']) ? 'http://' : 'https://') . $_SERVER['HTTP_HOST'];
-$item->cssClass = 'minwidth500';
-
-// Setup conf for selection of a simple string input
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM2');
-$item->defaultFieldValue = 'default value';
-$item->fieldAttr['placeholder'] = 'A placeholder here';
-$item->helpText = 'Tooltip text';
-
-// Setup conf for selection of a simple textarea input but we replace the text of field title
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM3');
-$item->nameText = $item->getNameText().' more html text ';
-
-// Setup conf for a selection of a Thirdparty
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM4');
-$item->setAsThirdpartyType();
-
-// Setup conf for a selection of a boolean
-$formSetup->newItem('PDPCONNECTFR_MYPARAM5')->setAsYesNo();
-
-// Setup conf for a selection of an Email template of type thirdparty
-$formSetup->newItem('PDPCONNECTFR_MYPARAM6')->setAsEmailTemplate('thirdparty');
-
-// Setup conf for a selection of a secured key
-//$formSetup->newItem('PDPCONNECTFR_MYPARAM7')->setAsSecureKey();
-
-// Setup conf for a selection of a Product
-$formSetup->newItem('PDPCONNECTFR_MYPARAM8')->setAsProduct();
-
-// Add a title for a new section
-$formSetup->newItem('NewSection')->setAsTitle();
-
-$TField = array(
-	'test01' => $langs->trans('test01'),
-	'test02' => $langs->trans('test02'),
-	'test03' => $langs->trans('test03'),
-	'test04' => $langs->trans('test04'),
-	'test05' => $langs->trans('test05'),
-	'test06' => $langs->trans('test06'),
-);
-
-// Setup conf for a simple combo list
-$formSetup->newItem('PDPCONNECTFR_MYPARAM9')->setAsSelect($TField);
-
-// Setup conf for a multiselect combo list
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM10');
-$item->setAsMultiSelect($TField);
-$item->helpText = $langs->transnoentities('PDPCONNECTFR_MYPARAM10');
-
-// Setup conf for a category selection
-$formSetup->newItem('PDPCONNECTFR_CATEGORY_ID_XXX')->setAsCategory('product');
-
-// Setup conf PDPCONNECTFR_MYPARAM10
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM10');
-$item->setAsColor();
-$item->defaultFieldValue = '#FF0000';
-//$item->fieldValue = '';
-//$item->fieldAttr = array() ; // fields attribute only for compatible fields like input text
-//$item->fieldOverride = false; // set this var to override field output will override $fieldInputOverride and $fieldOutputOverride too
-//$item->fieldInputOverride = false; // set this var to override field input
-//$item->fieldOutputOverride = false; // set this var to override field output
-
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM11')->setAsHtml();
-$item->nameText = $item->getNameText().' more html text ';
-$item->fieldInputOverride = '';
-$item->helpText = $langs->transnoentities('HelpMessage');
-$item->cssClass = 'minwidth500';
-
-$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM12');
-$item->fieldOverride = "Value forced, can't be modified";
-$item->cssClass = 'minwidth500';
-
-//$item = $formSetup->newItem('PDPCONNECTFR_MYPARAM13')->setAsDate();	// Not yet implemented
-*/
 
 $PDPManager = new PDPProviderManager($db);
 $providersConfig = $PDPManager->getAllProviders();
@@ -228,19 +139,22 @@ foreach ($TFieldProfiles as $key => $profileconfig) {
 $reg = array();
 $prefix = '';
 
-// If a PDP is selected, show parameters for this PDP
-if (getDolGlobalString('PDPCONNECTFR_PDP') && getDolGlobalString('PDPCONNECTFR_PDP') === "ESALINK") {
-	$provider = $PDPManager->getProvider('ESALINK');
-	$prefix = $provider->getConf()['dol_prefix'].'_';
-	$tokenData = $provider->getTokenData();
+// If Access Point is selected, show parameters for if
+if (getDolGlobalString('PDPCONNECTFR_PDP')) {
+	$provider = $PDPManager->getProvider(getDolGlobalString('PDPCONNECTFR_PDP'));
+	$providerconfig  = $provider->getConf();
+	$prefix = $providerconfig['dol_prefix'].'_';
 }
 
 
-// Setup conf to choose a PDP
+// Setup conf to choose an Access Point Provider
+
 $item = $formSetup->newItem('PDPCONNECTFR_PDP')->setAsSelect($TFieldProviders);
+$item->fieldValue = getDolGlobalString('PDPCONNECTFR_PDP');
+$item->defaultFieldValue = getDolGlobalString('PDPCONNECTFR_PDP');
 $item->helpText = $langs->transnoentities('PDPCONNECTFR_PDP_HELP');
 $item->cssClass = 'minwidth500';
-
+//var_dump($item);exit;
 
 $item = $formSetup->newItem('PDPCONNECTFR_LIVE')->setAsYesNo();
 $item->fieldParams['forcereload'] = 1;
@@ -257,12 +171,13 @@ $setupnotempty += count($formSetup->items);
 $reg = array();
 
 
+
 /*
  * Actions
  */
 
 // Setup conf for selection of the PDP provider
-if ($action == 'update' && GETPOST('PDPCONNECTFR_PDP') != getDolGlobalString('PDPCONNECTFR_PDP')) {
+if ($action == 'update' && GETPOSTISSET('PDPCONNECTFR_PDP') && GETPOST('PDPCONNECTFR_PDP') != getDolGlobalString('PDPCONNECTFR_PDP')) {
 	dolibarr_set_const($db, 'PDPCONNECTFR_PDP', GETPOST('PDPCONNECTFR_PDP'), 'chaine', 0, '', $conf->entity);
 	header("Location: ".$_SERVER["PHP_SELF"]);
 	exit;
@@ -278,19 +193,11 @@ if (!getDolGlobalString('PDPCONNECTFR_PROTOCOL')) {
 if (preg_match('/set'.$prefix.'TOKEN/i', $action, $reg)) {
 	// Generate token
 	$token = $provider->getAccessToken();
+
 	if ($token) {
 		setEventMessages("Token generated successfully", null, 'mesgs');
 		header("Location: ".$_SERVER["PHP_SELF"].'?page_y='.GETPOSTFLOAT('page_y'));
 		exit;
-	} else {
-		setEventMessages('', $provider->errors, 'errors');
-	}
-}
-
-if (preg_match('/make'.$prefix.'sampleinvoice/i', $action, $reg)) {
-	$result = $provider->sendSampleInvoice();
-	if ($result) {
-		setEventMessages('', $result, 'warnings');
 	} else {
 		setEventMessages('', $provider->errors, 'errors');
 	}
@@ -302,6 +209,15 @@ if (preg_match('/call'.$prefix.'HEALTHCHECK/i', $action, $reg)) {
 		setEventMessages($statusPDP['message'], null, 'mesgs');
 	} else {
 		setEventMessages($langs->trans('APApiNotReachable', $PDPManager->getProvider(getDolGlobalString('PDPCONNECTFR_PDP'))), array(), 'errors');
+	}
+}
+
+if (preg_match('/make'.$prefix.'sampleinvoice/i', $action, $reg)) {
+	$result = $provider->sendSampleInvoice();
+	if ($result) {
+		setEventMessages('', $result, 'warnings');
+	} else {
+		setEventMessages('', $provider->errors, 'errors');
 	}
 }
 
@@ -318,101 +234,35 @@ if (preg_match('/call'.$prefix.'HEALTHCHECK/i', $action, $reg)) {
 }*/
 
 
-if (getDolGlobalString('PDPCONNECTFR_PDP') && getDolGlobalString('PDPCONNECTFR_PDP') === "ESALINK") {
-	// Separator
-	$formSetup->newItem('PDPConnectionSetup')->setAsTitle();
-
-
+if (getDolGlobalString('PDPCONNECTFR_PDP')) {
 	// Link to get the Credentials
 	$prefixenv = getDolGlobalString('PDPCONNECTFR_LIVE') ? 'prod' : 'test';
 
-	$item = $formSetup->newItem('PDPCONNECTFR_LINK_CREATE_ACCOUNT');
-	$url = $providersConfig[getDolGlobalString('PDPCONNECTFR_PDP')][$prefixenv.'_account_admin_url'];
-	$item->fieldOverride = img_picto('', 'url', 'class="pictofixedwidth"').'<a href="'.$url.'" target="_new">'.$url.'</a>';
-
-
-	// Setup conf to choose a protocol of exchange
-	$item = $formSetup->newItem('PDPCONNECTFR_PROTOCOL')->setAsSelect($TFieldProtocols);
-	$item->helpText = $langs->transnoentities('PDPCONNECTFR_PROTOCOL_HELP');
-	$item->defaultFieldValue = 'FACTURX';
-	$item->cssClass = 'minwidth500';
-
-	// Setup conf to choose a profil of exchange
-	$item = $formSetup->newItem('PDPCONNECTFR_PROFILE')->setAsSelect($TFieldProfiles);
-	$item->helpText = $langs->transnoentities('PDPCONNECTFR_PROFILE_HELP');
-	$item->defaultFieldValue = 'EN16931';
-	$item->cssClass = 'minwidth500';
-
-
-	// Username
-	$item = $formSetup->newItem($prefix . 'USERNAME');
-	$item->cssClass = 'minwidth500';
-
-	// Password
-	$item = $formSetup->newItem($prefix . 'PASSWORD')->setAsGenericPassword();
-	$item->cssClass = 'minwidth500';
-
-	// API_KEY
-	$item = $formSetup->newItem($prefix . 'API_KEY');
-	$item->cssClass = 'minwidth500';
-
-
-	// Token
-	if (getDolGlobalString($prefix . 'API_KEY')) {
-		$item = $formSetup->newItem($prefix . 'TOKEN');
-		$item->cssClass = 'maxwidth500 ';
-		$item->fieldOverride = "";
-		if (!empty($tokenData['token'])) {
-			$item->fieldOverride = "<span class='opacitymedium hideonsmartphone'>" . htmlspecialchars('**************' . substr($tokenData['token'], -4)) . "</span>";
-		}
-		if (!$tokenData['token']) {
-			$item->fieldOverride .= '<a class="reposition" href="'.$_SERVER["PHP_SELF"]."?action=set".$prefix."TOKEN&token=".newToken().'">' . $langs->trans('generateAccessToken') . '<i class="fa fa-key paddingleft"></i></a><br>';
-		}
-		if ($tokenData['token']) {
-			$item->fieldOverride .= ' &nbsp; &nbsp; <a class="reposition" href="'.$_SERVER["PHP_SELF"]."?action=set".$prefix."TOKEN&token=".newToken().'">' . $langs->trans('reGenerateAccessToken') . '<i class="fa fa-key paddingleft"></i></a><br>';
-		}
-	}
-
-	if (!empty($tokenData['token'])) {
-		// Actions
-		$item = $formSetup->newItem($prefix . 'ACTIONS');
-
-		$item->fieldOverride .= '<a class="reposition" href="'.$_SERVER["PHP_SELF"]."?action=call".$prefix."HEALTHCHECK&token=".newToken().'">' . $langs->trans('testConnection') . ' (Healthcheck)<i class="fa fa-check paddingleft"></i></a><br>';
-		$item->cssClass = 'minwidth500';
-
-		if ($tokenData['token'] && getDolGlobalString('PDPCONNECTFR_PROTOCOL') && getDolGlobalString('PDPCONNECTFR_PROTOCOL') === 'FACTURX') {
-			$item->fieldOverride .= '<a class="reposition" href="'.$_SERVER["PHP_SELF"]."?action=make".$prefix."sampleinvoice&token=".newToken().'">' . $langs->trans('generateSendSampleInvoice') . '<i class="fa fa-file paddingleft"></i></a><br>';
-		}
-	}
-
-	// ROUTING ID
-	$item = $formSetup->newItem($prefix . 'ROUTING_ID');
-	$item->helpText = $langs->transnoentities($prefix . 'ROUTING_ID_HELP');
-	$item->fieldParams['isMandatory'] = 1;
-	$item->cssClass = 'minwidth500';
-
-	// To remove
-	/*if ($tokenData['token'] && getDolGlobalString('PDPCONNECTFR_PROTOCOL') && getDolGlobalString('PDPCONNECTFR_PROTOCOL') === 'FACTURX' && getDolGlobalString('PDPCONNECTFR_PROFILE') === 'EN16931') {
-		$item->fieldOverride .= "
-			<a
-			href='".$_SERVER["PHP_SELF"]."?action=makeInvoice&token=".newToken()."'
-			> Generate Invoice <i class='fa fa-file'></i></a><br/>
-		";
-	}*/
+	$provider->initFormSetup($formSetup2, $prefix, $prefixenv, $providersConfig, $TFieldProtocols, $TFieldProfiles);
 }
+
 
 $valueofapikeybefore = getDolGlobalString($prefix . 'API_KEY');
 
-include DOL_DOCUMENT_ROOT.'/core/actions_setmoduleoptions.inc.php';
+if ($action == 'update' && !empty($formSetup) && is_object($formSetup) && !empty($user->admin) && GETPOSTISSET('PDPCONNECTFR_PDP')) {
+	$formSetup->saveConfFromPost();
+}
+if ($action == 'update' && !empty($formSetup) && is_object($formSetup) && !empty($user->admin) && !GETPOSTISSET('PDPCONNECTFR_PDP')) {
+	$formSetup2->saveConfFromPost();
+}
+// The actions_setmoduleoptions.inc.php is not able to manage 2 formSetup so we do not use it.
+//include DOL_DOCUMENT_ROOT.'/core/actions_setmoduleoptions.inc.php';
+//var_dump($formSetup->items['PDPCONNECTFR_PDP']->fieldValue);exit; // For debug, to remove
 
 $valueofapikeyafter = getDolGlobalString($prefix . 'API_KEY');
 
 if ($action == 'update' && $prefix && $valueofapikeyafter != $valueofapikeybefore) {
-	header("Location: ".$_SERVER["PHP_SELF"]);
+	// If API key has changed, we make a redirect to reload page.
+	header("Location: ".$_SERVER["PHP_SELF"].'?page_y='.GETPOSTINT('page_y'));
 	exit;
 }
 
-//print getDolGlobalString('PDPCONNECTFR_PDP');
+
 
 
 
@@ -421,8 +271,6 @@ if ($action == 'update' && $prefix && $valueofapikeyafter != $valueofapikeybefor
  */
 
 $action = 'edit';
-
-$form = new Form($db);
 
 $help_url = '';
 $title = "PDPConnectFRSetup";
@@ -442,7 +290,6 @@ print dol_get_fiche_head($head, 'settings', $langs->trans($title), -1, "pdpconne
 
 // Setup page goes here
 print info_admin($langs->trans("PDPConnectInfo").'<br>'.$langs->trans("PDPConnectInfo2"));
-print '<br>';
 
 //print '<span class="opacitymedium">'.$langs->trans("PDPConnectFRSetupPage").'</span><br><br>';
 
@@ -450,17 +297,17 @@ print '<br>';
 $pdpconnectfr = new PdpConnectFr($db);
 $mysocCheck = $pdpconnectfr->validateMyCompanyConfiguration();
 if ($mysocCheck['res'] < 0) {
-	print '<div class="error">';
-	print '<strong>' . $langs->trans("MyCompanyConfigurationError") . ':</strong><br><br>';
+	print '<div class="warning">';
+	print '<strong>' . $langs->trans("MyCompanyConfigurationWarning") . ':</strong><br>';
 	print $mysocCheck['message'];
 	print '<br><br>';
 	print '<a class="button" href="' . DOL_URL_ROOT . '/admin/company.php">';
 	print $langs->trans("ModifyCompanyInformation") . ' <i class="fas fa-tools"></i>';
 	print '</a>';
 	print '</div>';
-	print '<br>';
 }
 
+print '<br>';
 
 /*if ($action == 'edit') {
  print $formSetup->generateOutput(true);
@@ -472,19 +319,27 @@ if ($mysocCheck['res'] < 0) {
  print '</div>';
  }
  */
+
 if (!empty($formSetup->items)) {
-	print $formSetup->generateOutput(true, false, $langs->transnoentitiesnoconv('PlatformPartner'), 'titlefieldmiddle');
+	print $formSetup->generateOutput(3, false, $langs->transnoentitiesnoconv('PlatformPartner'), 'titlefieldmiddle');
+	print '<br>';
+}
+
+if (!empty($provider) && !empty($formSetup2->items)) {
+    print '<div class="formborder opacitylow">';
+	print $provider->helpToGetCredentials;
+	print '</div>';
+	print '<br>';
+}
+
+if (!empty($formSetup2->items)) {
+	print $formSetup2->generateOutput(true, false, $langs->transnoentitiesnoconv('PDPConnectionSetup'), 'titlefieldmiddle');
 	print '<br>';
 }
 
 
-if (getDolGlobalString('PDPCONNECTFR_PDP') && getDolGlobalString('PDPCONNECTFR_PDP') === "ESALINK") {
 
-
-}
-
-
-// on change PDPCONNECTFR_PDP reload page to show specific configuration of selected PDP
+// If we change the Access point, we reload page to show specific configuration of the selected Access Point
 print '<script>
 $(document).ready(function() {
 	var pdpSelect = $("select[name=\'PDPCONNECTFR_PDP\']");

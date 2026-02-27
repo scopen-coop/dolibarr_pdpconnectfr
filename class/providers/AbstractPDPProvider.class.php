@@ -47,7 +47,11 @@ abstract class AbstractPDPProvider
     /** @var string Provider name */
     public $providerName;
 
+    /** @var string Help message to guide users in obtaining credentials for this provider */
+    public $helpToGetCredentials;
+
     public static $PDPCONNECTFR_LAST_IMPORT_KEY;
+
 
     /**
      * Constructor
@@ -65,9 +69,10 @@ abstract class AbstractPDPProvider
     /**
      * Validate configuration parameters before API calls.
      *
-     * @return bool True if configuration is valid.
+     * @param 	int		$mode 	0 check that user/pass is set, 1 check that token is set
+     * @return 	bool 			True if configuration is valid.
      */
-    abstract public function validateConfiguration();
+    abstract public function validateConfiguration($mode = 1);
 
     /**
      * Get access token for the provider.
@@ -86,15 +91,26 @@ abstract class AbstractPDPProvider
     /**
      * Get the base API URL for Esalink PDP
      *
-     * @return string
+     * @param string 	$mode 		'authent' or 'api'
+     * @return string				URL of the endpoint to call depending on the mode (authentication or regular API calls)
      */
-    public function getApiUrl()
+    public function getApiUrl($mode = 'api')
     {
         $prod = getDolGlobalString('PDPCONNECTFR_LIVE', '');
-		$url = $this->config['test_api_url'];
-		if ($prod != '') {
-			$url = $this->config['prod_api_url'];
+
+		if ($mode === 'auth') {
+            $url = $this->config['test_auth_url'];
+            if ($prod != '') {
+                $url = $this->config['prod_auth_url'];
+            }
+            return $url;
+		} else {
+			$url = $this->config['test_api_url'];
+			if ($prod != '') {
+				$url = $this->config['prod_api_url'];
+			}
 		}
+
 		return $url;
     }
 
@@ -199,8 +215,7 @@ abstract class AbstractPDPProvider
         $serviceName = $this->config['dol_prefix'] . '_' . ($this->config['live'] ? 'PROD' : 'TEST');
 
         // For backward compatibility with Dolibarr versions < 23.0.0
-        if (version_compare(DOL_VERSION, '23.0.0', '<')) {
-
+        if (version_compare(DOL_VERSION, '23.0.0-alpha', '<')) {
             dolibarr_set_const($db, $serviceName.'_TOKEN', $accessToken, 'chaine', 0, '', $conf->entity);
 
             if ($refreshToken !== null) {
@@ -210,9 +225,7 @@ abstract class AbstractPDPProvider
             if ($expire_at !== null) {
                 dolibarr_set_const($db, $serviceName.'_EXPIRE', $expire_at, 'chaine', 0, '', $conf->entity);
             }
-
         } else {
-
             // Check if a token already exists for this service
             $sql_check = "SELECT rowid FROM ".MAIN_DB_PREFIX."oauth_token
                         WHERE service = '".$db->escape($serviceName)."'

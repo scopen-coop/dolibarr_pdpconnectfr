@@ -19,9 +19,9 @@
 
 
 /**
- * \file    pdpconnectfr/class/providers/EsalinkPDPProvider.class.php
+ * \file    pdpconnectfr/class/providers/SuperPDPProvider.class.php
  * \ingroup pdpconnectfr
- * \brief   Esalink PDP provider integration class
+ * \brief   SuperPDP PDP provider integration class
  */
 
 dol_include_once('pdpconnectfr/class/providers/AbstractPDPProvider.class.php');
@@ -32,14 +32,14 @@ require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
 
 
 /**
- * Class to manage Esalink PDP provider integration.
+ * Class to manage SuperPDP PDP provider integration.
  */
-class EsalinkPDPProvider extends AbstractPDPProvider
+class SuperPDPProvider extends AbstractPDPProvider
 {
 	/**
 	 * @var string		Name
 	 */
-    var $name = 'ESALINK';
+    var $name = 'SUPERPDP';
 
 	/**
 	 * @var string		Help to get credentials and set up the provider configuration.
@@ -47,7 +47,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
     var $helpToGetCredentials = '';
 
 
-	/**
+    /**
      * Constructor
      *
      */
@@ -57,22 +57,27 @@ class EsalinkPDPProvider extends AbstractPDPProvider
     	parent::__construct($db);
 
         $this->config = array(
-            'provider_url' => 'https://ppd.hubtimize.fr',
-            'prod_auth_url' => 'https://ppd.hubtimize.fr/api/orchestrator/v1/', 	// TODO: Replace the URL once known
-            'test_auth_url' => 'https://ppd.hubtimize.fr/api/orchestrator/v1/',
-        	'prod_api_url' => 'https://ppd.hubtimize.fr/api/orchestrator/v1/', 		// TODO: Replace the URL once known
-            'test_api_url' => 'https://ppd.hubtimize.fr/api/orchestrator/v1/',
-            'username' => getDolGlobalString('PDPCONNECTFR_ESALINK_USERNAME', ''),
-            'password' => getDolGlobalString('PDPCONNECTFR_ESALINK_PASSWORD', ''),
-            'api_key' => getDolGlobalString('PDPCONNECTFR_ESALINK_API_KEY', ''),
-            'api_secret' => getDolGlobalString('PDPCONNECTFR_ESALINK_API_SECRET', ''),
-            'dol_prefix' => 'PDPCONNECTFR_ESALINK',
+            'provider_url' => 'https://superpdp.tech/',
+            'prod_auth_url' => 'https://api.superpdp.tech/oauth2/', 	// TODO: Replace the URL once known
+            'test_auth_url' => 'https://api.superpdp.tech/oauth2/',
+        	'prod_api_url' => 'https://api.superpdp.tech/v1.beta/', // TODO: Replace the URL once known
+            'test_api_url' => 'https://api.superpdp.tech/v1.beta/',
+            //'username' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_USERNAME', ''),
+            //'password' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_PASSWORD', ''),
+            'client_id' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_ID', ''),
+            'client_secret' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_SECRET', ''),
+            'dol_prefix' => 'PDPCONNECTFR_SUPERPDP',
             'live' => getDolGlobalInt('PDPCONNECTFR_LIVE', 0)
         );
 
+        $this->helpToGetCredentials = '<div class="">'.$langs->trans("PDPCONNECTFR_SUPERPDP_HELP_CREDENTIAL1").'</div>';
+        $this->helpToGetCredentials .= '<div class="margintoponly">'.$langs->trans("PDPCONNECTFR_SUPERPDP_HELP_CREDENTIAL2", '{s1}').'</div>';
+		$this->helpToGetCredentials .= '<div class="margintoponly">'.$langs->trans("PDPCONNECTFR_SUPERPDP_HELP_CREDENTIAL3", '{s2}').'</div>';
+		$this->helpToGetCredentials .= '<div class="margintoponly">'.$langs->trans("PDPCONNECTFR_SUPERPDP_HELP_CREDENTIAL4", '{s3}', '{s4}', '{s5}').'</div>';
 
-        $this->helpToGetCredentials = $langs->trans("PDPCONNECTFR_ESALINKP_HELP_CREDENTIAL1");
-        $this->helpToGetCredentials .= '<br>'.$langs->trans("PDPCONNECTFR_ESALINKP_HELP_CREDENTIAL2", '{s1}');
+		$redirect_uri = dol_buildpath('/pdpconnectfr/admin/setup.php', 2);
+
+		$this->callbackurl = $redirect_uri;
 
         // Retrieve and complete the OAuth token information from the database
        	$this->tokenData = $this->fetchOAuthTokenDB();
@@ -99,16 +104,20 @@ class EsalinkPDPProvider extends AbstractPDPProvider
 
 		$tokenData = $this->getTokenData();
 
+		$langs->load("oauth");
 
 		// Set content of the help page
 		$url = $providersConfig[getDolGlobalString('PDPCONNECTFR_PDP')][$prefixenv.'_account_admin_url'];
-		$urltosubscribe = img_picto('', 'url', 'class="pictofixedwidth"').'<a href="'.$url.'" target="_new">'.$url.'</a>';
-		$this->helpToGetCredentials = str_replace('{s1}', $urltosubscribe, $this->helpToGetCredentials);
+		$this->helpToGetCredentials = str_replace('{s1}', img_picto('', 'url', 'class="pictofixedwidth"').'<a href="'.$url.'" target="_new">'.$url.'</a>', $this->helpToGetCredentials);
+		$this->helpToGetCredentials = str_replace('{s2}', '<input type="text" class="width300" value="'.$this->callbackurl.'">', $this->helpToGetCredentials);
+		$this->helpToGetCredentials = str_replace('{s3}', $langs->transnoentitiesnoconv("OAUTH_ID"), $this->helpToGetCredentials);
+		$this->helpToGetCredentials = str_replace('{s4}', $langs->transnoentitiesnoconv("OAUTH_SECRET"), $this->helpToGetCredentials);
+		$this->helpToGetCredentials = str_replace('{s5}', $langs->transnoentitiesnoconv("Save"), $this->helpToGetCredentials);
 
 
 		// E-Invoice ID
 		$item = $formSetup->newItem($prefix . 'ROUTING_ID');
-		$item->helpText = $langs->transnoentities($prefix . 'PDPCONNECTFR_ROUTING_ID_HELP');
+		$item->helpText = $langs->transnoentities('PDPCONNECTFR_ROUTING_ID_HELP');
 		$item->fieldAttr['placeholder'] = $mysoc->idprof1;
 		$item->fieldParams['isMandatory'] = 0;
 		$item->cssClass = 'minwidth300';
@@ -128,20 +137,23 @@ class EsalinkPDPProvider extends AbstractPDPProvider
 		$item->fieldParams['trClass'] = 'advancedoption';
 
 		// Username
-		$item = $formSetup->newItem($prefix . 'USERNAME');
+		$item = $formSetup->newItem($prefix . 'CLIENT_ID');
+		$item->nameText = $langs->trans('OAUTH_ID');
 		$item->cssClass = 'minwidth500';
 
 		// Password
-		$item = $formSetup->newItem($prefix . 'PASSWORD')->setAsGenericPassword();
+		$item = $formSetup->newItem($prefix . 'CLIENT_SECRET')->setAsGenericPassword();
+		$item->nameText = $langs->trans('OAUTH_SECRET');
 		$item->cssClass = 'minwidth500';
 
 		// API_KEY
-		$item = $formSetup->newItem($prefix . 'API_KEY');
-		$item->cssClass = 'minwidth500';
+		//$item = $formSetup->newItem($prefix . 'API_KEY');
+		//$item->cssClass = 'minwidth500';
 
 		// Token
-		if (getDolGlobalString($prefix . 'API_KEY')) {
+		if (getDolGlobalString($prefix . 'CLIENT_ID') && getDolGlobalString($prefix . 'CLIENT_SECRET')) {
 			$item = $formSetup->newItem($prefix . 'TOKEN');
+			$item->nameText = $langs->trans('Token');
 			$item->cssClass = 'maxwidth500 ';
 			$item->fieldOverride = "";
 			if (!empty($tokenData['token'])) {
@@ -190,18 +202,16 @@ class EsalinkPDPProvider extends AbstractPDPProvider
 
         $error = array();
         if ($mode == 0) {
-	        if (empty($this->config['username'])) {
-	        	 $langs->load("main");
-	            $error[] = $langs->trans("ErrorFieldRequired", $langs->transnoentities('Username'));
+	        if (empty($this->config['client_id'])) {
+	        	$langs->loadLangs(array("main", "oauth"));
+	            $error[] = $langs->trans('ErrorFieldRequired', $langs->transnoentities('OAUTH_ID'));
 	        }
-	        if (empty($this->config['password'])) {
-	        	$langs->load("main");
-	            $error[] = $langs->trans('ErrorFieldRequired', $langs->transnoentities('Password'));
+	        if (empty($this->config['client_secret'])) {
+	        	$langs->loadLangs(array("main", "oauth"));
+	            $error[] = $langs->trans('ErrorFieldRequired', $langs->transnoentities('OAUTH_SECRET'));
 	        }
         } elseif ($mode == 1) {
-	        if (empty($this->config['api_key'])) {
-	            $error[] = $langs->trans('ApiKeyIsRequired');
-	        }
+        	// TODO Check token exists
         }
 
         if (!empty($error)) {
@@ -219,18 +229,26 @@ class EsalinkPDPProvider extends AbstractPDPProvider
     public function getAccessToken() {
         global $langs;
 
-        $param = json_encode(array(
-            'username' => $this->config['username'],
-            'password' => $this->config['password']
-        ));
+        $providerconfig = $this->getConf();
 
-        $response = $this->callApi("token", "POSTALREADYFORMATED", $param, [], 'get_access_token');
+        $param = array(
+        	'grant_type' => "client_credentials",
+			'client_id' => $providerconfig['client_id'],
+    		'client_secret' => $providerconfig['client_secret']
+        );
+        $paramstring = http_build_query($param);
+
+        $extraHeaders = array(
+    		'Content-Type' => 'application/x-www-form-urlencoded'
+		);
+
+        $response = $this->callApi("token", "POST", $paramstring, $extraHeaders, 'get_access_token');
 
         $status_code = $response['status_code'];
 		$body = $response['response'];
 
-        if ($status_code == 200 && isset($body['access_token']) && isset($body['refresh_token']) && isset($body['expires_in'])) {
-            $this->saveOAuthTokenDB($body['access_token'], $body['refresh_token'], $body['expires_in']);
+        if ($status_code == 200 && isset($body['access_token']) && isset($body['expires_in'])) {
+            $this->saveOAuthTokenDB($body['access_token'], $body['refresh_token'] ?? '', $body['expires_in']);
 
             return $body['access_token'];
         } else {
@@ -245,7 +263,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
      * @return string|null New access token or null on failure.
      */
     public function refreshAccessToken() {
-        // No route to refresh token for PDP provider so we get a new one
+        // No route to refresh token for AP provider so we get a new one
         return $this->getAccessToken();
     }
 
@@ -258,7 +276,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
     {
         global $langs;
 
-        $response = $this->callApi("healthcheck", "GET", false, [], 'healthcheck');
+        $response = $this->callApi("companies/me", "GET", false, [], 'healthcheck');
 
         if ($response['status_code'] === 200) {
             $returnarray['status_code'] = true;
@@ -525,10 +543,6 @@ class EsalinkPDPProvider extends AbstractPDPProvider
 
 		$url = $this->getApiUrl(($callType == 'get_access_token') ? 'auth' : 'api') . $resource;
 
-        $httpheader = array(
-            'hubtimize-api-key: '. $this->config['api_key']
-        );
-
         if (!isset($extraHeaders['Content-Type'])) {
             $httpheader[] = 'Content-Type: application/json';
             $httpheader[] = 'Accept: application/json';
@@ -569,6 +583,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
             if (!isset($extraHeaders['Accept'])) { // Json if default format
                 $body = json_decode($body, true);
             }
+
 			$returnarray = array(
 				'status_code' => $status_code,
 				'response' => $body
@@ -595,7 +610,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
             $call->endpoint = '/' . $resource;
             $call->request_body = is_array($params) ? json_encode($params) : $params;
             $call->response = is_array($returnarray['response']) ? json_encode($returnarray['response']) : $returnarray['response'];
-            $call->provider = 'Esalink';
+            $call->provider = 'SuperPDP';
             $call->entity = $conf->entity;
             $call->status = ($returnarray['status_code'] == 200 || $returnarray['status_code'] == 202) ? 1 : 0;
 
@@ -653,7 +668,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
         dol_syslog(__METHOD__ . " syncFlows start from ".dol_print_date($dateafter, 'standard')." limit ".$limit, LOG_DEBUG);
         dol_syslog(__METHOD__ . " syncFlows start from ".dol_print_date($dateafter, 'standard')." limit ".$limit, LOG_DEBUG, 0, "_pdpconnectfr");
 
-        // If limit is 0, we first need to get the total number of flows to sync because set a default limit of 25 if not specified
+        // If limit is 0, we first need to get the total number of flows to sync because AP set a default limit of 25 if not specified
         if ($limit == 0) {
 			$jsonparams = json_encode($params);
         	$response = $this->callApi($resource, "POST", $jsonparams);

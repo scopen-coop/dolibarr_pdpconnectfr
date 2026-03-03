@@ -22,8 +22,6 @@
  * \brief   Hook of module
  */
 
-use Luracast\Restler\Data\Arr;
-
 require_once DOL_DOCUMENT_ROOT.'/core/class/commonhookactions.class.php';
 require_once __DIR__ . "/pdpconnectfr.class.php";
 dol_include_once('/pdpconnectfr/class/providers/PDPProviderManager.class.php');
@@ -239,7 +237,6 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 
         if (isset($object->element) && in_array($object->element, ['facture'])) {
-
             // $object->fetch_thirdparty();
             // $thirdpartyCountryCode = $object->thirdparty->country_code;
 
@@ -249,6 +246,14 @@ class ActionsPdpconnectfr extends CommonHookActions
 
             // Get current status of e-invoice
             $currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus($object->ref);
+
+           // Action to set the E-invoice status manually
+            if ($action == 'seteinvoicestatus') {
+				$result = $pdpConnectFr->setEInvoiceStatus($object, GETPOSTINT('seteinvoicestatus'), '');
+            	if ($result < 0) {
+                	$this->errors = array_merge($this->errors, $pdpConnectFr->errors);
+                }
+            }
 
             // Action to send invoice to PDP
             if ($action == 'send_to_pdp'
@@ -279,8 +284,8 @@ class ActionsPdpconnectfr extends CommonHookActions
 
             // Action to generate the E-invoice
             if ($action == 'generate_einvoice') {
+            	$object->fetch_thirdparty();
                 $invoiceObject = $object;
-                $invoiceObject->fetch_thirdparty();
 
                 // Call function to create Factur-X document
                 require_once __DIR__.'/protocols/ProtocolManager.class.php';
@@ -706,17 +711,23 @@ class ActionsPdpconnectfr extends CommonHookActions
 
             // Einvoice generated or not
             $einvoiceGenerated = $pdpConnectFr->fetchLastknownInvoiceStatus($obj->ref)['file'];
-            print '<td class="center">';
+            print '<td class="center tdoverflowmax125">';
             if ($einvoiceGenerated) {
                 print '<i class="fas fa-check-circle" style="color:green;" title="'.$langs->trans('EInvoiceGeneratedList').'"></i>';
             }
             print '</td>';
+			if (isset($parameters['i']) && empty($parameters['i'])) {
+				$parameters['totalarray']['nbfield']++;
+			}
 
             // syncstatus
             $currentStatusDetails = $obj->pdp_syncstatus ? $pdpConnectFr->getStatusLabel($obj->pdp_syncstatus) : '-';
-            print '<td class="center">';
+            print '<td class="center tdoverflowmax125" title="'.dolPrintHTMLForAttribute($currentStatusDetails).'">';
             print $currentStatusDetails;
             print '</td>';
+			if (isset($parameters['i']) && empty($parameters['i'])) {
+				$parameters['totalarray']['nbfield']++;
+			}
         }
 
         // Supplier invoice list, Product list, Soc list
@@ -727,21 +738,27 @@ class ActionsPdpconnectfr extends CommonHookActions
         )) {
             $obj = $parameters['obj'];
 
-            print '<td>';
+            print '<td class="tdoverflowmax125">';
             if ($obj->pdplink_id) {
-                print $obj->pdp_provider;
+                print dolPrintHTML($obj->pdp_provider);
             }
             print '</td>';
+			if (isset($parameters['i']) && empty($parameters['i'])) {
+				$parameters['totalarray']['nbfield']++;
+			}
         }
 
         if (in_array('thirdpartylist', $contexts, true)) {
             $obj = $parameters['obj'];
 
-            print '<td>';
+            print '<td class="tdoverflowmax125">';
             if ($obj->pdplink_id) {
-                print $obj->routing_id;
+                print dolPrintHTML($obj->routing_id);
             }
             print '</td>';
+			if (isset($parameters['i']) && empty($parameters['i'])) {
+				$parameters['totalarray']['nbfield']++;
+			}
         }
 
         return 0;

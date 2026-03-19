@@ -61,11 +61,11 @@ class SuperPDPProvider extends AbstractPDPProvider
             'provider_url' => 'https://superpdp.tech/',
             'prod_auth_url' => 'https://api.superpdp.tech/oauth2/', 	// TODO: Replace the URL once known
             'test_auth_url' => 'https://api.superpdp.tech/oauth2/',
-        	'prod_api_url' => 'https://api.superpdp.tech/v1.beta/', // TODO: Replace the URL once known
-            'test_api_url' => 'https://api.superpdp.tech/v1.beta/',
-            //'username' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_USERNAME', ''),
-            //'password' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_PASSWORD', ''),
-            'client_id' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_ID', ''),
+        	//'prod_api_url' => 'https://api.superpdp.tech/v1.beta/', // TODO: Replace the URL once known
+            //'test_api_url' => 'https://api.superpdp.tech/v1.beta/',
+        	'prod_api_url' => 'https://api.superpdp.tech/afnor-flow/v1/', // TODO: Replace the URL once known
+            'test_api_url' => 'https://api.superpdp.tech/afnor-flow/v1/',
+        	'client_id' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_ID', ''),
             'client_secret' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_SECRET', ''),
             'dol_prefix' => getDolGlobalString('PDPCONNECTFR_PDP') == 'SUPERPDPViaPartner' ? 'PDPCONNECTFR_SUPERPDPVIAPARTNER' : 'PDPCONNECTFR_SUPERPDP',
             'live' => getDolGlobalInt('PDPCONNECTFR_LIVE', 0)
@@ -150,11 +150,11 @@ class SuperPDPProvider extends AbstractPDPProvider
 		$item->fieldParams['trClass'] = 'advancedoption';
 
 		// Setup conf to choose a profil of exchange
-		$item = $formSetup->newItem('PDPCONNECTFR_PROFILE')->setAsSelect($TFieldProfiles);
-		$item->helpText = $langs->transnoentities('PDPCONNECTFR_PROFILE_HELP');
-		$item->defaultFieldValue = 'EN16931';
-		$item->cssClass = 'minwidth500';
-		$item->fieldParams['trClass'] = 'advancedoption';
+		// $item = $formSetup->newItem('PDPCONNECTFR_PROFILE')->setAsSelect($TFieldProfiles);
+		// $item->helpText = $langs->transnoentities('PDPCONNECTFR_PROFILE_HELP');
+		// $item->defaultFieldValue = 'EN16931';
+		// $item->cssClass = 'minwidth500';
+		// $item->fieldParams['trClass'] = 'advancedoption';
 
 		// Username
 		$item = $formSetup->newItem($prefix . 'CLIENT_ID');
@@ -301,7 +301,7 @@ class SuperPDPProvider extends AbstractPDPProvider
     {
         global $langs;
 
-        $response = $this->callApi("companies/me", "GET", false, [], 'healthcheck');
+        $response = $this->callApi("healthcheck", "GET", false, [], 'healthcheck');
 
         if ($response['status_code'] === 200) {
             $returnarray['status_code'] = true;
@@ -357,8 +357,9 @@ class SuperPDPProvider extends AbstractPDPProvider
             'flowInfo' => json_encode([
                 "trackingId" => $object->ref,
                 "name" => "Invoice_" . $object->ref,
-                "flowSyntax" => "FACTUR-X",
-                "flowProfile" => "CIUS",
+                "flowSyntax" => "Factur-X",
+                //"flowProfile" => "CIUS",
+                "flowProfile" => "Extended-CTC-FR",
                 "sha256" => hash_file('sha256', $invoice_path)
             ]),
             'file' => new CURLFile($invoice_path, 'application/pdf', basename($invoice_path))
@@ -450,6 +451,8 @@ class SuperPDPProvider extends AbstractPDPProvider
      */
     public function sendSampleInvoice()
     {
+    	global $db;
+    	
         $outputLog = array(); // Feedback to display
 
         // Generate sample invoice
@@ -466,10 +469,26 @@ class SuperPDPProvider extends AbstractPDPProvider
 
             // Generate E-invoice by calling the method of the Protocol
             // Example by calling FactureXProcol->generateInvoice()
-            $result = $protocol->generateInvoice($invoiceObject->id);
+            $result = $protocol->generateInvoice($invoiceObject);
         */
 
-        $invoice_path = $this->exchangeProtocol->generateSampleInvoice();
+        $pdpconnectfr = new PdpConnectFr($db);
+        
+        try {
+	        if ((float) DOL_VERSION < 24.0) {
+	        	$invoice_path = $this->exchangeProtocol->generateSampleInvoiceOld($pdpconnectfr);
+	        } else {
+	        	$invoice_path = $this->exchangeProtocol->generateSampleInvoice($pdpconnectfr);
+	        }
+	        if ($invoice_path === -1) {
+	        	$this->errors[] = $this->exchangeProtocol->error;
+	            return 0;
+	        }
+        } catch(Exception $e) {
+        	$this->errors[] = $e->getMessage();
+            return 0;
+        }
+
         // invoice_path is something like "/.../documents/pdpconnectfr/temp/02_ZugferdDocumentPdfBuilder_PrintLayout_Merged.pdf"
 
         if ($invoice_path) {
@@ -495,17 +514,16 @@ class SuperPDPProvider extends AbstractPDPProvider
         // Params
         $params = [
             'flowInfo' => json_encode([
-                "trackingId" => "INV-2025-001",
-                "name" => "Invoice_2025_001",
-                "flowSyntax" => "FACTUR-X",
+                "trackingId" => "INV-TEST",
+                "name" => "Invoice_INV-TEST",
+                "flowSyntax" => "Factur-X",
                 "flowProfile" => "CIUS",
                 "sha256" => hash_file('sha256', $invoice_path)
             ]),
             'file' => new CURLFile($invoice_path, 'application/pdf', basename($invoice_path))
         ];
 
-        $response = $this->callApi("flows", "POSTALREADYFORMATED", $params, $extraHeaders, 'Send Sample Invoice');
-
+        $response = $this->callApi("flows", "POSTALREADYFORMATED", $params, $extraHeaders, 'send_sample_invoice');
 
         if ($response['status_code'] == 200 || $response['status_code'] == 202) {
             $flowId = $response['response']['flowId'];
@@ -541,7 +559,7 @@ class SuperPDPProvider extends AbstractPDPProvider
                 return 0;
             }
         } else {
-            $this->errors[] = "Failed to send sample invoice.";
+            $this->errors[] = "Failed to send sample invoice: HTTP ".$response['status_code'];
             return 0;
         }
     }
@@ -596,7 +614,8 @@ class SuperPDPProvider extends AbstractPDPProvider
             $httpheader[] = 'Authorization: Bearer ' . $this->tokenData['token'];
         }
 
-        /*if (is_array($params)){
+        /*
+		if (is_array($params)){
         	$params = http_build_query($params);
         }*/
 
@@ -1292,7 +1311,7 @@ class SuperPDPProvider extends AbstractPDPProvider
                         $sql = "SELECT d.syncstatus as status";
                         $sql .= " FROM " . MAIN_DB_PREFIX . "pdpconnectfr_extlinks as d";
                         $sql .= " WHERE d.fk_element = " . ((int) $factureObj->id);
-                        $sql .= " AND d.element_type = '" . $db->escape(Facture::class) . "'";
+                        $sql .= " AND d.element_type = '" . $db->escape($factureObj->element) . "'";
                         $resql = $db->query($sql);
                         $needToInsertExtLink = 0;
                         if ($resql) {

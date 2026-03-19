@@ -63,6 +63,7 @@ dol_include_once('pdpconnectfr/lib/pdpconnectfr.lib.php');
  *
  * This class handles the FacturX protocol implementation for generating
  * and managing electronic invoices according to the FacturX standard.
+ * This also throw an error if data is not correct.
  *
  * @note    This implementation is based on FacturX plugin developed by CAP REL.
  *          It has been adapted and integrated into the PDPConnectFR module to provide
@@ -84,16 +85,24 @@ class FacturXProtocol extends AbstractProtocol
 
     /**
      * Generate the XML content for a given invoice according to the Factur-X standard.
+     * This also make a lot of check
      *
      * This method converts the provided invoice data into a structured XML file
      * compliant with the Factur-X specification (hybrid PDF + XML format).
      *
-     * @param object $invoice Invoice object containing all necessary data.
-     * @return string XML representation of the invoice.
+     * @param 	CommonInvoice	$invoice 		Invoice object containing all necessary data.
+     * @param	?Translate		$outputlangs	Output language
+     * @return 	string 							XML representation of the invoice.
      */
-    public function generateXML($invoice)
+    public function generateXML($invoice, $outputlangs = null)
     {
         global $conf, $user, $langs, $mysoc, $db;
+
+        // Use customer language
+        if (empty($outputlangs) || ! ($outputlangs instanceOf Translate)) {
+        	$outputlangs = $langs;
+        }
+        $newlang = '';
 
         $this->sourceinvoice = $invoice;
         $outputlang = $langs->defaultlang;
@@ -109,7 +118,8 @@ class FacturXProtocol extends AbstractProtocol
         if (!is_object($invoice->thirdparty)) {
             $invoice->fetch_thirdparty();
         }
-
+        
+        
         // Prepare Invoice Data for XML Generation
         $facture_number = $object->ref;
         $note_pub = $object->note_public ? $object->note_public : "";
@@ -127,25 +137,16 @@ class FacturXProtocol extends AbstractProtocol
         } else {
             $account->fetch(getDolGlobalString('FACTURX_DEFAULT_BANK_ACCOUNT'));
         }
-        $account_proprio = \trim($account->owner_name);
+        $account_proprio = trim($account->owner_name);
         if ($account_proprio == '') {
-            dol_syslog('Bank account holder name is empty, please correct it, use socname instead but it could be inccorrect for XRechnung BT-85: Payment account name', \LOG_WARNING);
+            dol_syslog('Bank account holder name is empty, please correct it, use socname instead but it could be inccorrect for XRechnung BT-85: Payment account name', LOG_WARNING);
             $account_proprio = $mysoc->name;
-        }
-
-        // customer account linked
-        $contact = $object->thirdparty;
-        if (isset($object->contact)) {
-            $contact = $object->contact;
         }
 
         // Calculate missing VAT number for thirdparty if applicable
         if ($object->thirdparty->tva_assuj && empty($object->thirdparty->tva_intra)) {
             $object->thirdparty->tva_intra = $pdpconnectfr->thirdpartyCalcTva_intra($object->thirdparty);
         }
-
-        // Customer Email
-        $buyerEmail = $this->extractBuyerMail($contact, $object->thirdparty);
 
         // Get customer order references and delivery dates
         $customerOrderReferenceList = [];
@@ -168,7 +169,7 @@ class FacturXProtocol extends AbstractProtocol
         }
 
         // Initialize ZugferdDocumentBuilder (FacturX XML) -----------------------------------------------
-        dol_syslog(\get_class($this) . '::executeHooks create new XML document based on PROFILE_EN16931 (CIUS-FR)');
+        dol_syslog(get_class($this) . '::executeHooks create new XML document based on PROFILE_EN16931 (CIUS-FR)');
         $profile = getDolGlobalString('PDPCONNECTFR_PROFILE');
         switch ($profile) {
             case 'EN16931' :
@@ -178,7 +179,7 @@ class FacturXProtocol extends AbstractProtocol
                 $used_profile = ZugferdProfiles::PROFILE_EXTENDED;
                 $facturxpdf = ZugferdDocumentBuilder::createNew($used_profile);
         }
-        dol_syslog(\get_class($this) . '::executeHooks create new XML document based on ' . $used_profile);
+        dol_syslog(get_class($this) . '::executeHooks create new XML document based on ' . $used_profile);
         // Initialize ZugferdDocumentBuilder (FacturX XML) -----------------------------------------------
 
         // Get the type of invoice in FacturX nomenclature
@@ -187,17 +188,40 @@ class FacturXProtocol extends AbstractProtocol
         	throw new Exception('BADINVOICETYPE: The type for invoice id '.$object->id.' is not yet supported.');
         }
 
-        $idprof = thirdpartyidprof($object) ?? '';
-        $myidprof = idprof($mysoc);
+        $idprof = thirdpartyidprof($object) ?? '';										// May be SIREN
+        $legalOrgId = $this->IEC_6523_code($object->thirdparty->country_code);
+
+        $uri = $pdpconnectfr->getBuyerCommunicationURI($object->thirdparty);			// May be SIREN or SIREN_xxx
+        $legalOrgUri = $this->IEC_6523_code($object->thirdparty->country_code, 1);
+
+        $myidprof = idprof($mysoc);														// May be SIREN
+        $myLegalOrgId = $this->IEC_6523_code($mysoc->country_code);
+
+        $myUri = $pdpconnectfr->getSellerCommunicationURI(0);							// May be SIREN or SIREN_xxx
+        $myLegalOrgUri = $this->IEC_6523_code($mysoc->country_code, 1);
+        
+        //var_dump($idprof, $legalOrgId, $uri, $legalOrgUri, $myidprof, $myLegalOrgId, $myUri, $myLegalOrgUri); exit;
 
         // Add test
         if (empty($idprof)) {
 			throw new Exception('BADTHIRDPARTYPROFID: The main professional ID of the thirdparty '.$object->name.' is empty.');
         }
         if (empty($myidprof)) {
-			throw new Exception('BADPROFID: The professional ID of your company is empty. Fix this in your company setup page.');
+			throw new Exception('BADPROFID: The professional ID of your company is empty. Fix this in your company or module setup page.');
         }
 
+        if ($myLegalOrgId == "0002" && strlen($myidprof) != 9) {	// If einvoice ID is French SIREN, we check it has 9 chars.
+			throw new Exception('BADPROFID: The professional ID has type SIREN but length is not 9 characters. Fix this in your company or einvoice module setup page.');
+        }
+
+        // Test VAT number
+        if (!empty($mysoc->tva_intra) && !empty($mysoc->country_code) && substr($mysoc->tva_intra, 0, 2) != $mysoc->country_code) {
+        	throw new Exception('BADVATNUMBER: The VAT number of your company must start with your country code.');
+        }
+        if (!empty($object->thirdparty->tva_intra) && !empty($object->thirdparty->country_code) && substr($object->thirdparty->tva_intra, 0, 2) != $object->thirdparty->country_code) {
+        	throw new Exception('BADVATNUMBER: The VAT number of the thirdparty '.$object->thirdparty->name.' must start with its 2 letter country code.');
+        }
+        
         //  Build XML Document Header (Seller, Buyer, Dates)
         $facturxpdf
             ->setDocumentInformation(
@@ -209,18 +233,19 @@ class FacturXProtocol extends AbstractProtocol
                 $outputlang
             )
             ->addDocumentNote($note_pub)
-            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMT', 'NA'), null, "PMT")
-            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMD', 'NA'), null, "PMD")
-            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_AAB', 'NA'), null, "AAB")
+            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMT') ?: $outputlangs->trans("NoInvoiceCollectionFees"), null, "PMT")
+            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMD') ?: $outputlangs->trans('NoLatePaymentFees'), null, "PMD")
+            ->addDocumentNote(getDolGlobalString('PDPCONNECTFR_AAB') ?: $outputlangs->trans('NoEarlyPaymentDiscount'), null, "AAB")
 
             // ---------------- Seller ----------------
             ->setDocumentSeller($mysoc->name, $myidprof)
             ->addDocumentSellerTaxRegistration("VA", $mysoc->tva_intra ?? 'FRSPECIMEN')
-            ->setDocumentSellerLegalOrganisation(
+            ->setDocumentSellerLegalOrganisation(					// Mandatory : 0002 = SIREN.
                 $myidprof,
-                $this->IEC_6523_code($mysoc->country_code), // TODO: maybe we can add a parameter to customize this.
+                $myLegalOrgId,
                 $mysoc->name ?? 'SPECIMEN'
             )
+            ->addDocumentSellerGlobalId($myUri, $myLegalOrgUri)		// Optional  : 0225 = SIREN. Can be a more international code like DUNS
             ->setDocumentSellerAddress(
                 $mysoc->address      ?? 'ADDRESS EMPTY',
                 "",
@@ -244,30 +269,25 @@ class FacturXProtocol extends AbstractProtocol
                 $object->thirdparty->country_code ?? 'COUNTRY'
             )
             ->addDocumentBuyerTaxRegistration("VA", $object->thirdparty->tva_intra ?? '')
-            ->setDocumentBuyerLegalOrganisation(
+            ->setDocumentBuyerLegalOrganisation(					// Mandatory : 0002 = SIREN.
                 $idprof,
-                $this->IEC_6523_code($object->thirdparty->country_code),
-                $contact->name ?? $contact->lastname
+                $legalOrgId,
+                $object->thirdparty->name
             )
+            ->addDocumentBuyerGlobalId($uri, $legalOrgUri)			// Optional  : 0225 = SIREN. Can be a more international code like DUNS
             ->setDocumentBuyerCommunication(
-                '0225',
-                $pdpconnectfr->remove_spaces($pdpconnectfr->getBuyerCommunicationURI($object->thirdparty))
+                $legalOrgUri,
+                $uri
             );
 
-
-        // Add seller ID scheme
-        $facturxpdf->addDocumentSellerGlobalId($myidprof, $this->IEC_6523_code($mysoc->country_code)); // TODO: maybe we can add a parameter to customize this.
-
-        // Add buyer ID scheme
-        /*if (!empty($this->thirdpartyidprof($object))) {
-            $facturxpdf->addDocumentBuyerGlobalId($this->thirdpartyidprof($object), $this->IEC_6523_code($object->thirdparty->country_code));
-        }*/
-
-        // Add delivery date
+            
+        // Add delivery date for section ApplicableHeaderTradeDelivery
         if (!empty($deliveryDateList)) {
-            $facturxpdf->setDocumentSupplyChainEvent(new DateTime($deliveryDateList[0]));
+			$deliveryDateList = $invoice->date;
         }
+        $facturxpdf->setDocumentSupplyChainEvent(new DateTime($deliveryDateList[0]));
 
+        
         // Add additional referenced documents (Order references) - Disabled for Chorus
         // Not for chorus : a été rejetée pour le(s) motif(s) suivants, identifié(s) dans le flux cycle de vie : L'element (AttachmentBinaryObject.value) est obligatoire si l'element (FichierXml.SupplyChainTradeTransaction.ApplicableHeaderTradeAgreement.AdditionalReferencedDocument) est renseigne.
         if (!$chorus) { // TODO : check this condition
@@ -278,38 +298,38 @@ class FacturXProtocol extends AbstractProtocol
             }
         }
 
-        // use customer language
-        $outputlangs = $langs;
-        $newlang = '';
-
-        // Set Trade Contact details --- TODO: Check logic
-        $contacts = $object->getIdContact('internal', 'SALESREPFOLL');
+        // Set Trade Contact details (sale representative)
+        $usercontacts = $object->getIdContact('internal', 'SALESREPFOLL');
         $object->user = null;
-        if (!empty($contacts) && $object->fetch_user($contacts[0]) > 0) {
-            $name = $object->user->getFullName($outputlangs);
-            $office_phone = $object->user->office_phone;
-            $office_fax = $object->user->office_fax;
-            $email = $object->user->email;
+        if (!empty($usercontacts) && $object->fetch_user($usercontacts[0]) > 0) {
+            $salerepresentative_name = $object->user->getFullName($outputlangs);
+            $salerepresentative_office_phone = $object->user->office_phone;
+            $salerepresentative_office_fax = $object->user->office_fax;
+            $salerepresentative_email = $object->user->email;
         } else {
             // Fallback to current user if no sales representative found
-            $name = $user->getFullName($outputlangs);
-            $office_phone = $user->office_phone;
-            $office_fax = $user->office_fax;
-            $email = $user->email;
+            $salerepresentative_name = $user->getFullName($outputlangs);
+            $salerepresentative_office_phone = $user->office_phone;
+            $salerepresentative_office_fax = $user->office_fax;
+            $salerepresentative_email = $user->email;
         }
         // Fallback to company details if user details are missing
-        if (empty($office_phone)) {
-            $office_phone = $mysoc->phone;
+        if (empty($salerepresentative_office_phone)) {
+            $salerepresentative_office_phone = $mysoc->phone;
         }
-        if (empty($office_fax)) {
-            $office_fax = $mysoc->fax;
+        if (empty($salerepresentative_office_fax)) {
+            $salerepresentative_office_fax = $mysoc->fax;
         }
-        if (empty($email)) {
-            $email = $mysoc->email;
+        if (empty($salerepresentative_email)) {
+            $salerepresentative_email = $mysoc->email;
         }
-        $facturxpdf->setDocumentSellerContact($name, "", $office_phone, $office_fax, $email);
-        $facturxpdf->setDocumentSellerCommunication("0225", $pdpconnectfr->remove_spaces($pdpconnectfr->getSellerCommunicationURI()));
+        $facturxpdf->setDocumentSellerContact($salerepresentative_name, "", $salerepresentative_office_phone, $salerepresentative_office_fax, $salerepresentative_email);	// If contactPersonName is set, contactDepartmentNamemust not be set.
+        $facturxpdf->setDocumentSellerCommunication($myLegalOrgUri, $myUri);
 
+        // Set buyer contact
+        if ($object->contact instanceOf Contact) {
+        // 	$facturxpdf->setDocumentBuyerContact($object->contact->getFullName($outputlangs), "", $object->contact->phone ?: $object->contact->phone_mobile, $object->contact->fax, $object->contact->email);	// If contactPersonName is set, contactDepartmentNamemust not be set.
+        }
 
         // Set Buyer Reference (Service Code for Chorus) and Contract References
         if (!empty($object->array_options['options_d4d_service_code'])) {
@@ -354,7 +374,8 @@ class FacturXProtocol extends AbstractProtocol
             $outputlangs->setDefaultLang($newlang);
         }
 
-        // Add invoice lines
+  
+        // Loop on each invoice line
         $numligne = 1;
         $depositlines = array();
         foreach ($object->lines as $line) {
@@ -368,6 +389,10 @@ class FacturXProtocol extends AbstractProtocol
                 continue;
             }
 
+        	if ($line->subprice < 0 || $line->subprice_ttc < 0) {
+				throw new Exception("NEGATIVE_UNIT_PRICE_NOT_ALLOWED: Unit price in lines can't be negative. Try to edit the line with ID ".$line->id);
+        	}
+            
             if ($line->desc == '(DEPOSIT)') {
                 $isDepositLine = 1;
                 $depositFactRef = "";
@@ -494,7 +519,6 @@ class FacturXProtocol extends AbstractProtocol
             // https://github.com/horstoeko/zugferd/wiki/Creating-XML-Documents#working-with-discounts-and-charges
             if ($line->subprice < 0) {
                 dol_syslog("PDPConnectFR : there is negative line, convert as a global discount", \LOG_INFO);
-                // setEventMessages($langs->transnoentitiesnoconv('FxNegativeLine'), [], 'warnings');
                 // print json_encode($line);exit;
                 $facturxpdf->addDocumentPositionGrossPriceAllowanceCharge(abs($line->subprice) * $line->qty, false, null, null, "Discount");
                 //other ideas
@@ -503,10 +527,27 @@ class FacturXProtocol extends AbstractProtocol
             }
 
             // VAT informations (Line Tax)
+            // BT-118 can be
+            // S: Standrd rate (20, 10, ...)
+            // Z: Zero rate
+            // E: Exempt
+            // K: Intracomm sale
+            // G: Export outside of EU
             if ($line->tva_tx > 0) {
-                $facturxpdf->addDocumentPositionTax('S', 'VAT', $line->tva_tx);
+            	$categoryVAT = 'S';
+            	
+                $facturxpdf->addDocumentPositionTax($categoryVAT, 'VAT', $line->tva_tx);
             } else {
-                $facturxpdf->addDocumentPositionTax('K', 'VAT', '0.00');
+            	$categoryVAT = 'K';
+            	if (empty($mysoc->tva_assuj)) {
+            		$categoryVAT = 'E';
+            	} elseif (! $invoice->thirdparty->isInEEC()) {
+            		$categoryVAT = 'G';
+            	} elseif ($mysoc->isInEEC() && $invoice->thirdparty->isInEEC() && $mysoc->country_code != $invoice->thirdparty->country_code) {
+            		$categoryVAT = 'K';
+            	}
+
+                $facturxpdf->addDocumentPositionTax($categoryVAT, 'VAT', '0.00');
             }
 
             // Discount percentage on a line
@@ -582,6 +623,7 @@ class FacturXProtocol extends AbstractProtocol
                 $pdpconnectfr->remove_spaces($account->bic)
             );
 
+
         // is there a billing period for that invoice ?
         //setDocumentBillingPeriod
 
@@ -599,7 +641,7 @@ class FacturXProtocol extends AbstractProtocol
                 }
             }
             // if (empty(getDolGlobalString('FACTURX_USE_TRIGGER',''))) {
-            setEventMessages($allErrors, [], 'errors');
+            $this->errors = $allErrors;
             // }
             // $this->errors[] = json_encode($res);
             dol_syslog(get_class($this) . '::executeHooks  (1) : ' . $allErrors, LOG_ERR);
@@ -609,14 +651,23 @@ class FacturXProtocol extends AbstractProtocol
 
         // Generate file XML Factur-X
         $filename = dol_sanitizeFileName($invoice->ref);
-		$filedir = getMultidirOutput($invoice, '', 1);
-        $xmlfile = getMultidirOutput($invoice, '', 1, 'temp').'/'.$filename.'/factur-x.xml';	// Nameof file should be factur-x.xml so it will also have this nameonce added into PDF
+		$filedir = getMultidirOutput($invoice, '', 1, 'temp');
+		// Add a file with name factur-x.xml or xrechnung.xml
+        $xmlfile = $filedir.'/'.$filename.'/factur-x.xml';	// Nameof file should be factur-x.xml so it will also have this name once added into PDF
+        
 
         dol_mkdir(dirname($xmlfile));
 		dol_delete_file($xmlfile);
 
         $facturxpdf->writeFile($xmlfile);
+        
+        
+        // Remove the string <ram:ApplicableHeaderTradeDelivery/> from file if it exists (it is an empty tag that may be refused by some AP)
+		/*$content = file_get_contents($xmlfile);
+		$content = str_replace('<ram:ApplicableHeaderTradeDelivery/>', '', $content);	// Remove the tag
+		file_put_contents($xmlfile, $content);*/
 
+		
         // Patch the generated XML to add missing elements for better EXTENDED-CTC-FR compatibility (Only for some specific cases)
         if ($invoice->type == $invoice::TYPE_CREDIT_NOTE || !empty($depositlines)) {
             dol_syslog(get_class($this) . '::executeHooks Patch XML for better EXTENDED-CTC-FR compatibility');
@@ -625,6 +676,8 @@ class FacturXProtocol extends AbstractProtocol
             file_put_contents($xmlfile, $patchedXml); // overwrite the file with the patched content
         }
 
+        dolChmod($xmlfile);
+        
         return $xmlfile;
     }
 
@@ -635,15 +688,20 @@ class FacturXProtocol extends AbstractProtocol
      * to produce a final hybrid document ready for exchange or archiving.
      *
      * @param 	int|Object 	$invoice_id    	Invoice ID or Invoice Object to be processed.
-     * @return 	string       				-1 if ko, path if ok.
+     * @param	?Translate	$outputlangs	Output language
+     * @return 	int|string       			-1 if ko, path if ok.
      */
-    public function generateInvoice($invoice_id)
+    public function generateInvoice($invoice_id, $outputlangs = null)
     {
         // Global variables declaration (typical for Dolibarr environment)
         global $langs, $db;
-
+        
         dol_syslog(get_class($this) . '::generateInvoice');
 
+        if (empty($outputlangs) || ! ($outputlangs instanceOf Translate)) {
+        	$outputlangs = $langs;
+        }
+        
         require_once DOL_DOCUMENT_ROOT."/compta/facture/class/facture.class.php";
 
         if ($invoice_id instanceof Facture) {
@@ -655,23 +713,26 @@ class FacturXProtocol extends AbstractProtocol
 
 	        if ($invoiceResult < 0) {
 	            dol_syslog(get_class($this) . "::generateInvoice failed to load invoice id=" . $invoice_id, LOG_ERR);
-	            setEventMessages($langs->trans("ErrorLoadingInvoice"), [], 'errors');
+	            $this->error = $langs->trans("ErrorLoadingInvoice");
+	            $this->errors[] = $this->error; 
 	            return -1;
 	        }
         }
 
         // Generate XML
         try {
-	        $xmlfile = $this->generateXML($invoice);
+	        $xmlfile = $this->generateXML($invoice, $outputlangs);
         } catch(Exception $e) {
             dol_syslog(get_class($this) . "::generateInvoice failed to generate XML for invoice id=" . $invoice_id.". Error ".$e->getMessage(), LOG_ERR);
-            setEventMessages($langs->trans("ErrorGeneratingXML").'. '.$e->getMessage(), [], 'errors');
+	        $this->error = $langs->trans("ErrorGeneratingXML").'. '.$e->getMessage();
+	        $this->errors[] = $this->error; 
             return -1;
         }
 
         if (empty($xmlfile) || !file_exists($xmlfile)) {
             dol_syslog(get_class($this) . "::generateInvoice failed to generate XML for invoice id=" . $invoice_id, LOG_ERR);
-            setEventMessages($langs->trans("ErrorGeneratingXML"), [], 'errors');
+	        $this->error = $langs->trans("ErrorGeneratingXML");
+	        $this->errors[] = $this->error; 
             return -1;
         }
 
@@ -687,18 +748,18 @@ class FacturXProtocol extends AbstractProtocol
         $pathfacturxpdf = $filedir.'/'.$filename.'_facturx.pdf';	// The new name of the PDF including xml
         if (dol_copy($orig_pdf, $pathfacturxpdf)) {
             dol_syslog(get_class($this) . "::executeHooks copied original PDF to " . $pathfacturxpdf);
-            $orig_pdf = $pathfacturxpdf;
         } else {
             dol_syslog(get_class($this) . "::executeHooks failed to copy original PDF to " . $pathfacturxpdf, LOG_ERR);
+	        $this->error = $langs->trans("ErrorFailToCopyFile", $orig_pdf, $pathfacturxpdf);
+	        $this->errors[] = $this->error; 
             return -1;
         }
 
-
         // Initial PDF File Pre-check ---
         $precheck = false;
-        if (file_exists($orig_pdf) && is_readable($orig_pdf)) {
+        if (file_exists($pathfacturxpdf) && is_readable($pathfacturxpdf)) {
             $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            if (finfo_file($finfo, $orig_pdf) == 'application/pdf') {
+            if (finfo_file($finfo, $pathfacturxpdf) == 'application/pdf') {
                 $precheck = true;
             }
         }
@@ -706,18 +767,19 @@ class FacturXProtocol extends AbstractProtocol
         // Check if the source PDF is valid, log error and exit if not.
         if ($precheck == false) {
             dol_syslog(get_class($this) . "::executeHooks orig pdf file does not exists, can't create facturX");
+	        $this->error = 'Orig pdf file does not exists, can t create facturX';
+	        $this->errors[] = $this->error; 
             return -1;
         }
 
         clearstatcache(true);
-
 
         // Embed XML into PDF using FPDI and save
         require_once DOL_DOCUMENT_ROOT.'/core/lib/pdf.lib.php';
         require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
 
         $pdf = pdf_getInstance();
-        $pagecount = $pdf->setSourceFile($orig_pdf);
+        $pagecount = $pdf->setSourceFile($pathfacturxpdf);
 
         // import all pages of the original PDF
         for ($i = 1; $i <= $pagecount; $i++) {
@@ -725,7 +787,7 @@ class FacturXProtocol extends AbstractProtocol
             $pdf->addPage();
             $pdf->useTemplate($tpl);
         }
-
+        
         // Embed the XML file as a file attachment in the PDF
         if (file_exists($xmlfile)) {
             $pdf->Annotation(0, 0, 0, 0, '', array(
@@ -736,7 +798,7 @@ class FacturXProtocol extends AbstractProtocol
         }
 
         // Save the final PDF with the embedded XML
-        $pdf->Output($orig_pdf, 'F');
+        $pdf->Output($pathfacturxpdf, 'F');
 
         // Clean up the temporary XML file
         if (file_exists($xmlfile) && !getDolGlobalString('PDPCONNECTFR_DEBUG_MODE')) {
@@ -752,9 +814,10 @@ class FacturXProtocol extends AbstractProtocol
         if ($reshook < 0) {
             $this->error = $hookmanager->error;
             $this->errors = $hookmanager->errors;
+            return -1;
         }
 
-        return 1;
+        return $pathfacturxpdf;		// Name of PDF with factur-x
 
 
         // Saving ---
@@ -782,20 +845,24 @@ class FacturXProtocol extends AbstractProtocol
         return $ret;*/
     }
 
+    
     /**
-     * Generate a sample Factur-X invoice for demonstration or testing purposes.
+     * Generate a sample Factur-X invoice for demonstration or testing purposes (for Dolibarr version < 24.0)
      *
      * This method creates a dummy invoice with representative data
      * to illustrate the Factur-X structure without using real business information.
      *
-     * @return string Path or content of the generated sample invoice.
+     * @param	PdpConnectFr		$pdpconnectfr		PDPConnectFR
+     * @return 	string 									Path or content of the generated sample invoice.
      */
-    public function generateSampleInvoice()
+    public function generateSampleInvoiceOld($pdpconnectfr)
     {
-    	global $conf;
+    	global $conf, $langs, $mysoc;
 
 		dol_mkdir($conf->pdpconnectfr->dir_temp);
 
+		$outputlangs = $langs;		// TODO Use the target language
+		
         require __DIR__ . "/ExampleHelpers.php";
 
         $existingPdfFilename = __DIR__ . "/../../assets/00_ZugferdDocumentPdfBuilder_PrintLayout.pdf";
@@ -808,39 +875,67 @@ class FacturXProtocol extends AbstractProtocol
         $documentBuilder = ZugferdDocumentBuilder::createNew(ZugferdProfiles::PROFILE_EN16931);
 
         $documentBuilder->setDocumentInformation(
-            'R-2024/00001',                                     // Invoice Number (BT-1)
+            'INV-TEST',                                     	// Invoice Number (BT-1)
             ZugferdInvoiceType::INVOICE,                        // Type "Invoice" (BT-3)
             DateTime::createFromFormat("Ymd", "20241231"),      // Invoice Date (BT-2)
             ZugferdCurrencyCodes::EURO                          // Invoice currency is EUR (Euro) (BT-5)
         );
 
-        $documentBuilder->addDocumentNote('Lieferant GmbH' . PHP_EOL . 'Lieferantenstraße 20' . PHP_EOL . '80333 München' . PHP_EOL . 'Deutschland' . PHP_EOL . 'Geschäftsführer: Hans Muster' . PHP_EOL . 'Handelsregisternummer: H A 123' . PHP_EOL . PHP_EOL, null, 'REG');
+        $sellername = $mysoc->name ?: "MyBigCompanyTest";
+        $sellervat = $mysoc->tva_intra ?: "FRVAT123456";
+        $sellerid = $pdpconnectfr->getSellerCommunicationURI(0);
+        $sellerglobalid = $pdpconnectfr->getSellerCommunicationURI(0);
+
+        $myLegalOrgId = "0002";
+        if ($myLegalOrgId == "0002" && strlen($sellerid) != 9) {	// If einvoice ID is French SIREN, we check it has 9 chars.
+			throw new Exception('BADPROFID: The professional ID has type SIREN but length is not 9 characters. Fix this in your company or einvoice module setup page.');
+        }
+        
+        
+        $documentBuilder->addDocumentNote($sellername . PHP_EOL . 'Lieferantenstraße 20' . PHP_EOL . '80333 München' . PHP_EOL . 'Deutschland' . PHP_EOL . 'Geschäftsführer: Hans Muster' . PHP_EOL . 'Handelsregisternummer: H A 123' . PHP_EOL . PHP_EOL, null, 'REG');
+        
+
+        $documentBuilder->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMT') ?: $outputlangs->trans('NoInvoiceCollectionFees'), null, "PMT");
+        $documentBuilder->addDocumentNote(getDolGlobalString('PDPCONNECTFR_PMD') ?: $outputlangs->trans('NoLatePaymentFees'), null, "PMD");
+        $documentBuilder->addDocumentNote(getDolGlobalString('PDPCONNECTFR_AAB') ?: $outputlangs->trans('NoEarlyPaymentDiscount'), null, "AAB");
+
+        
         $documentBuilder->setDocumentBillingPeriod(DateTime::createFromFormat("Ymd", "20250101"), DateTime::createFromFormat("Ymd", "20250131"), "01.01.2025 - 31.01.2025");
         $documentBuilder->addDocumentInvoiceSupportingDocumentWithUri('REFDOC-2024/00001-1', 'http.//some.url', 'Inhaltsstoffe Joghurt');
         $documentBuilder->addDocumentInvoiceSupportingDocumentWithFile('REFDOC-2024/00001-2', $AdditionalDocument, 'Herkunftsnachweis Trennblätter');
         $documentBuilder->addDocumentTenderOrLotReferenceDocument('LOS 738625');
         $documentBuilder->addDocumentInvoicedObjectReferenceDocument('125', ZugferdReferenceCodeQualifiers::SALE_PERS_NUMB); // Sales person number
+
         $documentBuilder->setDocumentContractReferencedDocument('CON-2024/2025-001');
         $documentBuilder->setDocumentProcuringProject('PROJ-2025-001-1', 'Allgemeine Dienstleistungen');
-        $documentBuilder->addDocumentPaymentMeanToDirectDebit("DE12500105170648489890", "R-2024/00001");
+        
+        $documentBuilder->addDocumentPaymentMeanToDirectDebit("DE12500105170648489890", "INV-TEST");
         $documentBuilder->addDocumentPaymentTerm('Wird von Konto DE12500105170648489890 abgebucht', DateTime::createFromFormat("Ymd", "20250131"), 'MANDATE-2024/000001');
-        $documentBuilder->setDocumentSeller("Lieferant GmbH", "549910");
-        $documentBuilder->addDocumentSellerGlobalId("4000001123452", "0088");
-        $documentBuilder->addDocumentSellerTaxNumber("201/113/40209");
-        $documentBuilder->addDocumentSellerVATRegistrationNumber("DE123456789");
+        
+        $documentBuilder->setDocumentSeller($sellername, $sellerid);
+        $documentBuilder->setDocumentSellerLegalOrganisation($sellerid, $myLegalOrgId, $sellername);	// Mandatory: 0002 = SIREN
+        $documentBuilder->addDocumentSellerGlobalId($sellerglobalid, $myLegalOrgId);					// Optional : 0002 = SIREN. Can be a more international code like DUNS
+        
+        //$documentBuilder->setSpecifiedLegalOrganization();
+        $documentBuilder->addDocumentSellerTaxNumber($sellervat);
+        $documentBuilder->addDocumentSellerVATRegistrationNumber($sellervat);
+        
         $documentBuilder->setDocumentSellerAddress("Lieferantenstraße 20", "", "", "80333", "München", ZugferdCountryCodes::GERMANY);
-        $documentBuilder->setDocumentSellerContact("H. Müller", "Verkauf", "+49-111-2222222", "+49-111-3333333", "hm@lieferant.de");
+        $documentBuilder->setDocumentSellerContact("H. Müller", "", "+49-111-2222222", "+49-111-3333333", "hm@lieferant.de");
         $documentBuilder->setDocumentSellerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'sales@lieferant.de');
         $documentBuilder->setDocumentBuyer("Kunden AG Mitte", "GE2020211");
         $documentBuilder->setDocumentBuyerAddress("Kundenstraße 15", "", "", "69876", "Frankfurt", ZugferdCountryCodes::GERMANY);
-        $documentBuilder->setDocumentBuyerContact("H. Meier", "Einkauf", "+49-333-4444444", "+49-333-5555555", "hm@kunde.de");
+        $documentBuilder->setDocumentBuyerContact("H. Meier", "", "+49-333-4444444", "+49-333-5555555", "hm@kunde.de");
         $documentBuilder->setDocumentBuyerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'purchase@kunde.de');
         $documentBuilder->setDocumentPayee('Kunden AG Zahlungsdienstleistung');
         $documentBuilder->setDocumentBuyerOrderReferencedDocument("PO-2024-0003324");
         $documentBuilder->setDocumentSellerOrderReferencedDocument('SO-2024-000993337');
+
+        // If there is a delivery address
         $documentBuilder->setDocumentShipTo("Kunden AG Ost");
         $documentBuilder->setDocumentShipToAddress("Lieferstraße 1", "", "", "04109", "Leipzig", ZugferdCountryCodes::GERMANY);
         $documentBuilder->setDocumentSupplyChainEvent(DateTime::createFromFormat("Ymd", "20250115"));
+        
         $documentBuilder->addNewPosition("1");
         $documentBuilder->setDocumentPositionProductDetails("Trennblätter A4", "50er Pack", "TB100A4");
         $documentBuilder->setDocumentPositionNetPrice(9.9000);
@@ -863,6 +958,7 @@ class FacturXProtocol extends AbstractProtocol
         $documentBuilder->addDocumentTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 675.0, 47.25, 7.0);
         $documentBuilder->setDocumentSummation(957.87, 957.87, 873.00, 0.0, 0.0, 873.00, 84.87);
 
+            
         // Next let's do the ZugferddocumentPdfBuilder it's job - let's attach the XML to the PDF. The attachment filename will be factur-x.xml
         // since whe choosed the profile EN16931 in the ZugferdDocumentBuilder (see above)
         // In the following there are multiple methods how you can build a conform PDF from an existing print layout
@@ -942,9 +1038,9 @@ class FacturXProtocol extends AbstractProtocol
         // - %4$s .... contains the invoice date (extracted from the XML data)
         // The following example generates...
         // - the author:  .... Issued by seller with name Lieferant GmbH
-        // - the title    .... Lieferant GmbH : Invoice R-2024/00001
+        // - the title    .... Lieferant GmbH : Invoice INV-TEST
         // - the subject  .... Invoice-Document, Issued by Lieferant GmbH
-        // - the keywords .... R-2024/00001, Invoice, Lieferant GmbH, 2024-12-31
+        // - the keywords .... INV-TEST, Invoice, Lieferant GmbH, 2024-12-31
 
         $zugferdDocumentPdfBuilder = ZugferdDocumentPdfBuilder::fromPdfFile($documentBuilder, $existingPdfFilename);
         $zugferdDocumentPdfBuilder->setAuthorTemplate('Issued by seller with name %3$s');
@@ -997,6 +1093,79 @@ class FacturXProtocol extends AbstractProtocol
     }
 
 
+    /**
+     * Generate a sample Factur-X invoice for demonstration or testing purposes (for Dolibarr version >= 24.0)
+     *
+     * This method creates a dummy invoice with representative data
+     * to illustrate the Factur-X structure without using real business information.
+     *
+     * @param	PdpConnectFr		$pdpconnectfr		PDPConnectFR
+     * @return 	string 									Path or content of the generated sample invoice.
+     */
+    public function generateSampleInvoice($pdpconnectfr)
+    {
+    	global $conf, $langs;
+
+		dol_mkdir($conf->pdpconnectfr->dir_temp);
+
+		$outputlangs = $langs;		// TODO Use the target language
+
+		require_once DOL_DOCUMENT_ROOT . '/compta/facture/class/facture.class.php';
+		$tmpinvoice = new Facture($this->db);
+		$tmpinvoice->initAsSpecimen('nolines');
+
+		
+		$line = new FactureLigne($this->db);
+		$line->desc = $langs->trans("Description")." 1";
+		$line->qty = 1;
+		$line->subprice = 100;
+		$line->tva_tx = 20.0;
+		$line->localtax1_tx = 0;
+		$line->localtax2_tx = 0;
+		$line->remise_percent = 0;
+		$line->fk_product = 0;
+		$line->qty = 1;
+		$line->total_ht = 100;
+		$line->total_ttc = 120;
+		$line->total_tva = 20;
+		$line->multicurrency_tx = 2;
+		$line->multicurrency_total_ht = 200;
+		$line->multicurrency_total_ttc = 240;
+		$line->multicurrency_total_tva = 40;
+
+		$tmpinvoice->lines[] = $line;
+
+		$this->total_ht       += $line->total_ht;
+		$this->total_tva      += $line->total_tva;
+		$this->total_ttc      += $line->total_ttc;
+
+		$this->multicurrency_total_ht       += $line->multicurrency_total_ht;
+		$this->multicurrency_total_tva      += $line->multicurrency_total_tva;
+		$this->multicurrency_total_ttc      += $line->multicurrency_total_ttc;
+		
+		
+		require_once DOL_DOCUMENT_ROOT . '/societe/class/societe.class.php';
+		$tmpthirdparty = new Societe($this->db);
+		$tmpthirdparty->initAsSpecimen();
+		$tmpinvoice->thirdparty = $tmpthirdparty;
+		$tmpinvoice->socid = $tmpthirdparty->id;				// 0 for specimen
+
+		require_once DOL_DOCUMENT_ROOT . '/contact/class/contact.class.php';
+		$tmpcontact = new Contact($this->db);
+		$tmpcontact->initAsSpecimen();
+		$tmpcontact->socid = $tmpthirdparty->id;			// 0 for specimen
+		$tmpinvoice->contact = $tmpcontact;
+
+		// Generate the PDF
+		$tmpinvoice->generateDocument($tmpinvoice->model, $outputlangs);
+
+		// Generate the Factur-X PDF
+		$pathOfPdf = $this->generateInvoice($tmpinvoice, $outputlangs);
+
+		return $pathOfPdf;
+    }
+    
+    
     /**
      * Create a supplier invoice from a Factur-X file.
      *
@@ -1183,7 +1352,7 @@ class FacturXProtocol extends AbstractProtocol
             }
         }
 
-        dol_syslog(get_class($this) . '::createSupplierInvoiceFromFacturX parsedData: ' . json_encode($parsedData));
+        dol_syslog(get_class($this) . '::createSupplierInvoiceFromFacturX parsedData: ' . json_encode($parsedData), LOG_DEBUG);
 
         // Sync or create supplier based on seller info
         $syncSocRes = $this->_syncOrCreateThirdpartyFromFacturXSeller($parsedData, 'dolibarr', $flowId);
@@ -1282,7 +1451,7 @@ class FacturXProtocol extends AbstractProtocol
                 );
 
 
-                dol_syslog(get_class($this) . '::createSupplierInvoiceFromFacturX productRetrievedData: ' . json_encode($productRetrievedData));
+                dol_syslog(get_class($this) . '::createSupplierInvoiceFromFacturX productRetrievedData: ' . json_encode($productRetrievedData), LOG_DEBUG);
 
                 $is_deposit_line = 0;
                 $fk_remise = 0;
@@ -1640,29 +1809,29 @@ class FacturXProtocol extends AbstractProtocol
         // TODO: move this function to class utils
         $object->fetchObjectLinked();
         // check for delivery notes and correponding real delivery dates
-        if (isset($object->linkedObjectsIds['shipping']) && \is_array($object->linkedObjectsIds['shipping'])) {
+        if (isset($object->linkedObjectsIds['shipping']) && is_array($object->linkedObjectsIds['shipping'])) {
             foreach ($object->linkedObjectsIds['shipping'] as $expeditionId) {
-                $expedition = new \Expedition($this->db);
+                $expedition = new Expedition($this->db);
                 $expeditionFetchResult = $expedition->fetch($expeditionId);
                 if ($expeditionFetchResult > 0) {
                     if (!empty($expedition->origin) && $expedition->origin == "commande" && !empty($expedition->origin_id)) {
-                        $commande = new \Commande($this->db);
+                        $commande = new Commande($this->db);
                         $commandeFetchResult = $commande->fetch($expedition->origin_id);
                         if ($commandeFetchResult > 0 && !empty($commande->ref_client)) {
                             $customerOrderReferenceList[] = $commande->ref_client;
                         }
                     }
                     if (!empty($expedition->date_delivery)) {
-                        $deliveryDateList[] = \date('Y-m-d', $expedition->date_delivery);
+                        $deliveryDateList[] = date('Y-m-d', $expedition->date_delivery);
                     }
                 }
             }
         }
         // if delivery notes are linked and take the real delivery date from there. if no delivery notes are available,
         // take delivery date from order.
-        if (isset($object->linkedObjectsIds['commande']) && \is_array($object->linkedObjectsIds['commande'])) {
+        if (isset($object->linkedObjectsIds['commande']) && is_array($object->linkedObjectsIds['commande'])) {
             foreach ($object->linkedObjectsIds['commande'] as $commandeId) {
-                $commande = new \Commande($this->db);
+                $commande = new Commande($this->db);
                 $commandeFetchResult = $commande->fetch($commandeId);
                 if ($commandeFetchResult > 0) {
                     if (!empty($commande->ref_client)) {
@@ -1672,28 +1841,28 @@ class FacturXProtocol extends AbstractProtocol
                     $found = 0;
                     if (!empty($commande->linkedObjectsIds) && !empty($commande->linkedObjectsIds['shipping']) && \count($commande->linkedObjectsIds['shipping']) > 0) {
                         foreach ($commande->linkedObjectsIds['shipping'] as $expeditionId) {
-                            $expedition = new \Expedition($this->db);
+                            $expedition = new Expedition($this->db);
                             $expeditionFetchResult = $expedition->fetch($expeditionId);
                             if ($expeditionFetchResult > 0) {
                                 if (!empty($expedition->date_delivery)) {
                                     $found++;
-                                    $deliveryDateList[] = \date('Y-m-d', $expedition->date_delivery);
+                                    $deliveryDateList[] = date('Y-m-d', $expedition->date_delivery);
                                 }
                             }
                         }
                     }
                     if ($found == 0) {
                         if (!empty($commande->delivery_date)) {
-                            $deliveryDateList[] = \date('Y-m-d', $commande->delivery_date);
+                            $deliveryDateList[] = date('Y-m-d', $commande->delivery_date);
                         }
                     }
                 }
             }
         }
-        $customerOrderReferenceList = \array_unique($customerOrderReferenceList);
-        \sort($customerOrderReferenceList);
-        $deliveryDateList = \array_unique($deliveryDateList);
-        \rsort($deliveryDateList);
+        $customerOrderReferenceList = array_unique($customerOrderReferenceList);
+        sort($customerOrderReferenceList);
+        $deliveryDateList = array_unique($deliveryDateList);
+        rsort($deliveryDateList);
     }
 
     /**
@@ -1715,31 +1884,14 @@ class FacturXProtocol extends AbstractProtocol
     }
 
     /**
-     * extract mail from contact or thirdparty
+     * Return IEC_6523 code (https://docs.peppol.eu/poacc/billing/3.0/codelist/ICD/)
      *
-     * @param   $contact 	Contact		Dolibarr contact
-     * @param   $thirdparty Societe		Dolibarr thirdpart/societe
-     *
-     * @return  string email of buyer
-     */
-    private function extractBuyerMail($contact, $thirdparty)
-    { // TODO: move this function to class utils
-        dol_syslog("pdpconnectfr extractBuyerMail : contact=" . $contact->email . " | soc=" . $thirdparty->email);
-        if (!empty($contact->email)) {
-            return $contact->email;
-        }
-        return $thirdparty->email;
-    }
-
-    /**
-     * return IEC_6523 code (https://docs.peppol.eu/poacc/billing/3.0/codelist/ICD/)
-     *
-     * TODO: add other countries, at least europeans countries ...
-     *
+     * @param	string		$country_code		Country code
+     * @param	int			$global				Use 1 for a global ID
      * @return string code
      */
-    private function IEC_6523_code($country_code)
-    { // TODO: move this function to class utils
+    private function IEC_6523_code($country_code, $global = 0)
+    { 	
         $retour = "";
         switch ($country_code) {
             case 'BE':
@@ -1749,12 +1901,18 @@ class FacturXProtocol extends AbstractProtocol
                 $retour = "0000";
                 break;
             case 'FR':
-                $retour = "0002";
+            	if ($global) {
+                	$retour = "0225";	// SIREN.  0225 Einvoice ID
+            	} else {
+                	$retour = "0002";	// SIREN.
+            	}
                 break;
             default:
         }
         return $retour;
     }
+    
+    
 
     /************************************************
      *    Check line type from external module ?
@@ -2458,10 +2616,7 @@ class FacturXProtocol extends AbstractProtocol
             $resCheck = $product->check();
             if ($resCheck < 0) {
                 dol_syslog(__METHOD__ . ' Product check failed: ' . $product->error, LOG_ERR);
-                return [
-                    'res'     => -1,
-                    'message' => 'Product check failed: ' . implode("\n", $product->errors),
-                ];
+                return array('res' => -1, 'message' => 'Product check failed: ' . implode("\n", $product->errors));
             }
 
             // Create product
@@ -2581,7 +2736,10 @@ class FacturXProtocol extends AbstractProtocol
         $desc         = strtolower($line['proddesc'] ?? '');
 
         // A. Global ID known => product
-        $productGlobalIdTypes = ['0160', '0011', '0002', '0023', '0004', '0001', '0088']; // GTIN/UPC/EAN/GLN...
+        // SIREN = 0002
+        // EAN = 0088
+        // DUNS = 0060
+        $productGlobalIdTypes = ['0160', '0011', '0002', '0023', '0004', '0001', '0088']; // GTIN/UPC/EAN/GLN/DUNS...
         if ($globalId !== '' && in_array($globalIdType, $productGlobalIdTypes, true)) {
             return 0;
         }

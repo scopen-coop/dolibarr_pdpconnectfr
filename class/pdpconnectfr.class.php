@@ -598,13 +598,13 @@ class PdpConnectFr
     /**
      * Get all e-invoice status options
      *
-     * @param int $includeCodesInLabel 0 to not include codes in label, 1 to include codes in label
-     * @param int $onlyPdpStatuses If 1, only return PDP/PA statuses (exclude Dolibarr internal statuses)
-     * @param int $onlySendable If 1, only return statuses that can be sent to PDP/PA (for example, exclude STATUS_ERROR)
-     *
-     * @return array<int, string>
+     * @param int $includeCodesInLabel 	0 to not include codes in label, 1 to include codes in label
+     * @param int $onlyPdpStatuses 		If 1, only return PDP/PA statuses (exclude Dolibarr internal statuses)
+     * @param int $onlySendable 		If 1, only return statuses that can be sent to Access Point (for example, exclude Access Point STATUS_ERROR)
+     * @param int $onlyCreate			Keep only status used in create mode
+     * @return array<int, string>		Array of status
      */
-    public function getEinvoiceStatusOptions($includeCodesInLabel = 0, $onlyPdpStatuses = 0, $onlySendable = 0)
+    public function getEinvoiceStatusOptions($includeCodesInLabel = 0, $onlyPdpStatuses = 0, $onlySendable = 0, $onlyCreate = 0)
     {
         global $langs;
         $options = [];
@@ -616,24 +616,20 @@ class PdpConnectFr
             $options[$code] = $value;
         }
 
-        if ($onlyPdpStatuses === 1) {
+        if ($onlyPdpStatuses || $onlySendable) {
             // Remove Dolibarr internal statuses
             unset($options[self::STATUS_UNKNOWN]);
+            unset($options[self::STATUS_IGNORE]);
             unset($options[self::STATUS_NOT_GENERATED]);
+        }
+        if ($onlyPdpStatuses || $onlySendable || $onlyCreate) {
             unset($options[self::STATUS_GENERATED]);
             unset($options[self::STATUS_AWAITING_VALIDATION]);
             unset($options[self::STATUS_AWAITING_ACK]);
             unset($options[self::STATUS_ERROR]);
         }
 
-        if ($onlySendable === 1) {
-            // Remove Dolibarr internal statuses
-            unset($options[self::STATUS_UNKNOWN]);
-            unset($options[self::STATUS_NOT_GENERATED]);
-            unset($options[self::STATUS_GENERATED]);
-            unset($options[self::STATUS_AWAITING_VALIDATION]);
-            unset($options[self::STATUS_AWAITING_ACK]);
-            unset($options[self::STATUS_ERROR]);
+        if ($onlySendable || $onlyCreate) {
             // Remove PDP/PA statuses that cannot be sent
             unset($options[self::STATUS_DEPOSITED]);
             unset($options[self::STATUS_ISSUED]);
@@ -651,6 +647,11 @@ class PdpConnectFr
             unset($options[self::STATUS_PAYMENT_SENT]);
         }
 
+        if ($onlyCreate) {
+            unset($options[self::STATUS_APPROVED]);
+            unset($options[self::STATUS_REFUSED]);
+        }
+        
         // TODO : remove statuses that cannot be chronologically be sent (for example, it doesn't make sense to send "Taken over" if invoice is refused), PDP may accept them and ignore them without returning an error.
 
 
@@ -926,38 +927,36 @@ class PdpConnectFr
 
         $resprints = '';
 
-       		// Set $extrafield_collapse_display_value (do we have to collapse/expand the group after the separator)
-			$extrafield_collapse_display_value = -1;
-			$expand_display = ((isset($_COOKIE['DOLUSER_COLLAPSE_facture_trpdpconnectseparator']) || GETPOSTINT('ignorecollapsesetup')) ? (!empty($_COOKIE['DOLUSER_COLLAPSE_facture_trpdpconnectseparator'])) : !($extrafield_collapse_display_value == 2));
-			$disabledcookiewrite = 0;
-			if ($mode == 'create') {
-				// On create mode, force separator group to not be collapsible
-				$extrafield_collapse_display_value = 1;
-				$expand_display = true;	// We force group to be shown expanded
-				$disabledcookiewrite = 1; // We keep status of group unchanged into the cookie
-			}
-            $resprints .= '
-            <script nonce="" type="text/javascript">
+		// Set $extrafield_collapse_display_value (do we have to collapse/expand the group after the separator)
+		$extrafield_collapse_display_value = -1;
+		$expand_display = ((isset($_COOKIE['DOLUSER_COLLAPSE_facture_trpdpconnectseparator']) || GETPOSTINT('ignorecollapsesetup')) ? (!empty($_COOKIE['DOLUSER_COLLAPSE_facture_trpdpconnectseparator'])) : !($extrafield_collapse_display_value == 2));
+		$disabledcookiewrite = 0;
+		if ($mode == 'create') {
+			// On create mode, force separator group to not be collapsible
+			$extrafield_collapse_display_value = 1;
+			$expand_display = true; // We force group to be shown expanded
+			$disabledcookiewrite = 1; // We keep status of group unchanged into the cookie
+		}
+		$resprints .= '<script nonce="" type="text/javascript">
 			jQuery(document).ready(function() {';
-				if (empty($disabledcookiewrite)) {
-					if (!$expand_display) {
-						$resprints .= 'console.log("Inject js for the collapsing of trpdpconnect_collapseseparator - hide");
+		if (empty($disabledcookiewrite)) {
+			if (!$expand_display) {
+				$resprints .= 'console.log("Inject js for the collapsing of trpdpconnect_collapseseparator - hide");
 						jQuery(".trpdpconnect_collapseseparator").hide();';
-					} else {
-						$resprints .= 'console.log("Inject js for collapsing of trpdpconnect_collapseseparator - keep visible and set cookie");
-						document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=1; path='.$_SERVER["PHP_SELF"].'";';
-					}
-				}
-			$resprints .= '
-			   jQuery("#trpdpconnect").click(function(){
+			} else {
+				$resprints .= 'console.log("Inject js for collapsing of trpdpconnect_collapseseparator - keep visible and set cookie");
+						document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=1; path=' . $_SERVER["PHP_SELF"] . '";';
+			}
+		}
+		$resprints .= 'jQuery("#trpdpconnect").click(function(){
 			       console.log("We click on collapse/uncollapse to hide/show .trpdpconnectseparator");
 			       jQuery(".trpdpconnect_collapseseparator").toggle(100, function(){
 			           if (jQuery(".trpdpconnect_collapseseparator").is(":hidden")) {
 			               jQuery("#trpdpconnect td span").addClass("fa-plus-square").removeClass("fa-minus-square");
-			               document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=0; path='.$_SERVER["PHP_SELF"].'"
+			               document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=0; path=' . $_SERVER["PHP_SELF"] . '"
 			           } else {
 			               jQuery("#trpdpconnect td span").addClass("fa-minus-square").removeClass("fa-plus-square");
-			               document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=1; path='.$_SERVER["PHP_SELF"].'"
+			               document.cookie = "DOLUSER_COLLAPSE_facture_trpdpconnectseparator=1; path=' . $_SERVER["PHP_SELF"] . '"
 			           }
 			       });
 			   });
@@ -973,13 +972,20 @@ class PdpConnectFr
         	$url = DOL_URL_ROOT.'/fourn/facture/agenda.php?id=' . urlencode($object->id) . '&search_agenda_label=PDPCONNECTFR';
         }
         $langs->load("suppliers");
-        $resprints .= '<td><a href="' . $url . '">' . $langs->trans("History") . '<i class="marginleftonly fas fa-calendar-alt infobox-action"></i></a></td>';
+        $resprints .= '<td>';
+        if ($action != 'create') {
+	        $resprints .= '<a href="' . $url . '">' . $langs->trans("History") . '<i class="marginleftonly fas fa-calendar-alt infobox-action"></i></a>';
+        }
+        $resprints .= '</td>';
         $resprints .= '</tr>';
 
         $info = $currentStatusInfo['info'] ?? '';
 
         $editenable = $user->hasRight('facture', 'creer');
         if (method_exists($object, 'isEditable') && !$object->isEditable()) {
+        	$editenable = false;
+        }
+        if ($action == 'create') {
         	$editenable = false;
         }
 
@@ -992,7 +998,7 @@ class PdpConnectFr
         $resprints .= $langs->trans("einvoiceStatusFieldHelp") . '"></i>';*/
         $resprints .= '</td>';
         $resprints .= '<td>';
-        if ($action == 'editeinvoicestatus') {
+        if ($action == 'editeinvoicestatus' || $action == 'create') {
 			$resprints .=  '<form name="seteinvoicestatus" action="' . $_SERVER["PHP_SELF"] . '?id=' . $object->id . '" method="post">';
 			$resprints .=  '<input type="hidden" name="token" value="' . newToken() . '">';
 			$resprints .=  '<input type="hidden" name="action" value="seteinvoicestatus">';
@@ -1002,10 +1008,12 @@ class PdpConnectFr
 			// TODO Use a combo list with only status for ync Dolibarr -> AP
 			// Also status we can't modify manually must be greyed/disabled
 			//$arrayofeinvoicestatus = array();
-			$arrayofeinvoicestatus = $this->getEinvoiceStatusOptions(0, 0, 0);
+			$arrayofeinvoicestatus = $this->getEinvoiceStatusOptions(0, 0, 0, 1);
 
 			$resprints .=  $form->selectarray("seteinvoicestatus", $arrayofeinvoicestatus, $currentStatusInfo['code'], 0, 0, 0, '', 1);
-			$resprints .=  '<input type="submit" class="button button-edit smallpaddingimp reposition" value="' . $langs->trans('Modify') . '">';
+			if ($action != 'create') {
+				$resprints .=  '<input type="submit" class="button button-edit smallpaddingimp reposition" value="' . $langs->trans('Modify') . '">';
+			}
 			$resprints .=  '</form>';
         } else {
         	$resprints .= '<span id="einvoice-status">';

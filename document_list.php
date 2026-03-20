@@ -325,7 +325,7 @@ if (empty($reshook)) {
 }
 
 
-if (getDolGlobalString('PDPCONNECTFR_PDP') && getDolGlobalString('PDPCONNECTFR_PDP') === "ESALINK") {
+if (getDolGlobalString('PDPCONNECTFR_PDP')) {
 	$providerManager = new PDPProviderManager($db);
 	$provider = $providerManager->getProvider(getDolGlobalString('PDPCONNECTFR_PDP'));
 }
@@ -656,6 +656,7 @@ $newcardbutton = '';
 //$newcardbutton .= dolGetButtonTitleSeparator();
 //$newcardbutton .= dolGetButtonTitle($langs->trans('New'), '', 'fa fa-plus-circle', dol_buildpath('/pdpconnectfr/document_card.php', 1).'?action=create&backtopage='.urlencode($_SERVER['PHP_SELF']), '', $permissiontoadd);
 
+
 if ($provider) {
 	$title = $langs->trans("EInvoiceSynchronizationHelp", $provider->providerName);
 }
@@ -714,7 +715,7 @@ $selectedfields .= (count($arrayofmassactions) ? $form->showCheckAddButtons('che
 
 // Last flow sync info
 $last_sync = 0;
-if (GETPOSTDATE('last_sync_datetime', 'getpost', 'tzuserrel')) {
+if (GETPOSTDATE('last_sync_datetime', 'getpost', 'tzuserrel') && $action == 'delete') {		// If we do a delete, we may want to go older in past for next sync to retreive the deleted record, so we do not reuse the last date
 	$last_sync = GETPOSTDATE('last_sync_datetime', 'getpost', 'tzuserrel');
 }
 $last_sync_info = '<span class="opacitylowx">'.img_picto('', 'long-arrow-alt-right', 'class="pictofixedwidth"');
@@ -740,10 +741,12 @@ if ($resLastsyncinfosql) {
 }
 $last_sync_info .= '</span>';
 
+
 // Last supplier invoice that could not be processed by the system
 $last_supplier_invoice_error = '';
 $filePath = $conf->pdpconnectfr->dir_temp . '/facturx.pdf';
 if (file_exists($filePath)) {
+	//var_dump($filePath);
 	$urlOriginalFile = DOL_URL_ROOT . '/document.php?modulepart=pdpconnectfr&file=' . urlencode('temp/facturx.pdf');
 	$urlConvertedFile = DOL_URL_ROOT . '/document.php?modulepart=pdpconnectfr&file=' . urlencode('temp/facturx_readable.pdf');
 
@@ -772,6 +775,7 @@ if ($provider) {
 	if (getDolGlobalInt('PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS') && !GETPOSTDATE('last_sync_datetime', 'getpost', 'tzuserrel')) {
 		$last_sync -= (getDolGlobalInt('PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS') * 3600);
 	}
+
 	print '<tr>';
 	print '<td class="syncFormLabel">'.$langs->trans("StartSynchronizationFrom").'</td>';
 	print '<td>';
@@ -781,7 +785,10 @@ if ($provider) {
 		$gmtdatetosuggest = $syncfromdate;
 	}
 
-	print $form->selectDate($gmtdatetosuggest, 'last_sync_datetime', 1, 1, 1, '', 1, 0, 0, '', '', '', '', 1, '', $langs->trans('From'), 'tzuserrel');
+	print $form->selectDate($gmtdatetosuggest > 0 ? $gmtdatetosuggest : '', 'last_sync_datetime', 1, 1, 1, '', 1, 0, 0, '', '', '', '', 1, '', $langs->trans('From'), 'tzuserrel');
+	if ($conf->browser->layout != 'phone' && getDolGlobalInt('PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS')) {
+		print $form->textwithpicto('', $langs->transnoentitiesnoconv("PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS").': '.getDolGlobalInt('PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS').'<br><br>'.$langs->transnoentitiesnoconv("PDPCONNECTFR_SYNC_MARGIN_TIME_HOURS_HELP"));
+	}
 
 	print '</td>';
 
@@ -800,7 +807,7 @@ if ($provider) {
 		print '<td>';
 		print '<input type="number" id="maxflows" name="maxflows" class="maxwidth75 right" min="1" step="1" value="'.(GETPOSTINT('maxflows') ? GETPOSTINT('maxflows') : getDolGlobalInt('PDPCONNECTFR_FLOWS_SYNC_CALL_SIZE', 100)).'" required> ';
 		if ($conf->browser->layout != 'phone') {
-			print '<span class="opacitymedium ">'.$langs->trans("maxNumberToProcessHelp").'</span>';
+			print $form->textwithpicto('', $langs->transnoentitiesnoconv("maxNumberToProcessHelp"));
 		}
 		print '</td>';
 		print '</tr>';
@@ -875,7 +882,6 @@ if ($action == 'sync' && $provider) {
 // Sync results
 if ($action == 'confirm_sync' && getDolGlobalString('PDPCONNECTFR_PDP') && $confirm == 'yes' && !empty($sync_result)) {
 	if (isset($provider)) {
-
 		$cssclass = ($sync_result['res'] > 0) ? 'info' : 'error';
 
 		$syncerrortype = '';		// '', 'business' or 'technical'
@@ -888,9 +894,9 @@ if ($action == 'confirm_sync' && getDolGlobalString('PDPCONNECTFR_PDP') && $conf
 				$cssclass = 'warning';
 			}
 		} else {
-			if ($sync_result['totalFlows'] > $sync_result['batchlimit'] && empty($sync_result['syncedFlows']) && !empty($sync_result['alreadyExist'])) {
+			if ((is_null($sync_result['totalFlows']) || $sync_result['totalFlows'] > $sync_result['batchlimit']) && empty($sync_result['syncedFlows']) && !empty($sync_result['alreadyExist'])) {
 				$cssclass = 'warning';
-				$sync_result['actions'][] = $langs->trans("TryToIncreaseStartDateOrMax", $langs->transnoentitiesnoconv("StartSynchronizationFrom"), $langs->transnoentitiesnoconv("maxNumberToProcess"));
+				$sync_result['actions'][] = $langs->trans("TryToIncreaseStartDateOrMax", $langs->transnoentitiesnoconv("maxNumberToProcess"));
 			} else {
 				$cssclass = 'info';
 			}

@@ -852,8 +852,8 @@ class FacturXProtocol extends AbstractProtocol
      * This method creates a dummy invoice with representative data
      * to illustrate the Factur-X structure without using real business information.
      *
-     * @param	PdpConnectFr		$pdpconnectfr		PDPConnectFR
-     * @return 	string 									Path or content of the generated sample invoice.
+     * @param	PdpConnectFr			$pdpconnectfr		PDPConnectFR
+     * @return 	array<string,string> 						Path or content of the generated sample invoice.
      */
     public function generateSampleInvoiceOld($pdpconnectfr)
     {
@@ -1091,7 +1091,7 @@ class FacturXProtocol extends AbstractProtocol
         $zugferdDocumentPdfBuilder->generateDocument();
         $zugferdDocumentPdfBuilder->saveDocument($newPdfFilename);
 
-        return $newPdfFilename;
+        return array('path' => $newPdfFilename, 'ref' => 'INV-TEST');
     }
 
 
@@ -1101,8 +1101,8 @@ class FacturXProtocol extends AbstractProtocol
      * This method creates a dummy invoice with representative data
      * to illustrate the Factur-X structure without using real business information.
      *
-     * @param	PdpConnectFr		$pdpconnectfr		PDPConnectFR
-     * @return 	string 									Path or content of the generated sample invoice.
+     * @param	PdpConnectFr		$pdpconnectfr			PDPConnectFR
+     * @return 	array<string,string> 						Path or content of the generated sample invoice.
      */
     public function generateSampleInvoice($pdpconnectfr)
     {
@@ -1116,6 +1116,7 @@ class FacturXProtocol extends AbstractProtocol
 		$tmpinvoice = new Facture($this->db);
 		$tmpinvoice->initAsSpecimen('nolines');
 
+		$tmpinvoice->ref .= '-'.dol_print_date(dol_now(), '%Y%m%d-%H%M%S');
 
 		$line = new FactureLigne($this->db);
 		$line->desc = $langs->trans("Description")." 1";
@@ -1162,10 +1163,17 @@ class FacturXProtocol extends AbstractProtocol
 		// Generate the PDF
 		$tmpinvoice->generateDocument($tmpinvoice->model, $outputlangs);
 
+		// For invoice with ->specimen=1, the file is SPECIMEN.pdf so we rename it into ref
+		$dir = $conf->invoice->multidir_output[$conf->entity];
+		$srcfile = $dir.'/SPECIMEN.pdf';
+		$destfile = $dir.'/'.dol_sanitizeFileName($tmpinvoice->ref).'.pdf';
+
+		dol_move($srcfile, $destfile, '0', 1);
+
 		// Generate the Factur-X PDF
 		$pathOfPdf = $this->generateInvoice($tmpinvoice, $outputlangs);
 
-		return $pathOfPdf;
+		return array('path' => $pathOfPdf, 'ref' => $tmpinvoice->ref);
     }
 
 

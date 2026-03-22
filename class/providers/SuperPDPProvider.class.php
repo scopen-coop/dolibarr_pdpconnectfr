@@ -459,18 +459,22 @@ class SuperPDPProvider extends AbstractPDPProvider
      */
     public function sendSampleInvoice()
     {
-    	global $db;
+    	global $langs;
 
         $outputLog = array(); // Feedback to display
 
         // Generate sample invoice
-        $pdpconnectfr = new PdpConnectFr($db);
+        $pdpconnectfr = new PdpConnectFr($this->db);
 
         try {
 	        if ((float) DOL_VERSION < 24.0) {
-	        	$invoice_path = $this->exchangeProtocol->generateSampleInvoiceOld($pdpconnectfr);
+	        	$resarray = $this->exchangeProtocol->generateSampleInvoiceOld($pdpconnectfr);
+	        	$invoice_path = $resarray['path'];
+	        	$ref = $resarray['ref'];
 	        } else {
-	        	$invoice_path = $this->exchangeProtocol->generateSampleInvoice($pdpconnectfr);
+	        	$resarray = $this->exchangeProtocol->generateSampleInvoice($pdpconnectfr);
+	        	$invoice_path = $resarray['path'];
+	        	$ref = $resarray['ref'];
 	        }
 	        if ($invoice_path === -1) {
 	        	$this->errors[] = $this->exchangeProtocol->error;
@@ -506,8 +510,8 @@ class SuperPDPProvider extends AbstractPDPProvider
         // Params
         $params = [
             'flowInfo' => json_encode([
-                "trackingId" => "INV-TEST",
-                "name" => "Invoice_INV-TEST",
+                "trackingId" => $ref,
+                "name" => "Invoice_".$ref,
                 "flowSyntax" => "Factur-X",
                 "flowProfile" => "CIUS",
                 "sha256" => hash_file('sha256', $invoice_path)
@@ -551,7 +555,12 @@ class SuperPDPProvider extends AbstractPDPProvider
                 return 0;
             }
         } else {
-            $this->errors[] = "Failed to send sample invoice: HTTP ".$response['status_code'];
+            $this->error = $langs->trans("ErrorSendingInvoiceToPDP");
+            $this->error .= '<br>HTTP '.$response['status_code'];
+            if (!empty($response['errorCode'])) {
+				$this->error .= ' '.$response['errorCode'].(empty($response['errorMessage']) ? '': ' - '.$response['errorMessage']);
+            }
+            $this->errors[] = $this->error;
             return 0;
         }
     }
@@ -565,7 +574,7 @@ class SuperPDPProvider extends AbstractPDPProvider
      * @param array<string, string>         $extraHeaders   Optional additional headers
      * @param string|null                   $callType       Functional type of the API call for logging purposes (e.g., 'sync_flows', 'send_invoice')
      *
-	 * @return array{status_code:int,response:null|string|array<string,mixed>,call_id:null|string}
+	 * @return array{status_code:int,response:null|string|array<string,mixed>,?errorCode:string,?errorMessage:string,?id:int,?call_id:string}
 	 */
 	public function callApi($resource, $method, $params = false, $extraHeaders = [], $callType = '')
 	{
@@ -634,8 +643,12 @@ class SuperPDPProvider extends AbstractPDPProvider
 			}
             $returnarray = array(
 				'status_code' => $status_code,
-				'response' => 'Error ' . $status_code . ' - ' . $response['content']
-			);
+				'response' => 'Error ' . $status_code . ' - ' . (string) $response['content']
+            );
+            if ($contentarray = json_decode((string) $response['content'], true)) {
+				$returnarray['errorCode'] = $contentarray['errorCode'];
+	            $returnarray['errorMessage'] = $contentarray['errorMessage'];
+            }
 		}
 
         // Log the API call if we have the fonctional type
@@ -860,7 +873,7 @@ class SuperPDPProvider extends AbstractPDPProvider
 
         $globalres = ($error > 0 ? -1 : 1);
 
-        $globalresultmessage = ($globalres == 1) ? $langs->trans("SyncCompletedSuccessfuly") . ($batchlimit > 0 ? ' <span class="opacitylow">('.$langs->trans("maxNumberToProcess").' '.$batchlimit.")</span>" : "")  : ($langs->trans("SyncAborted", $i, $limit, ($flow['flowId'] ?? 'N/A')));
+        $globalresultmessage = ($globalres == 1) ? $langs->trans("SyncCompletedSuccessfuly") . ($batchlimit > 0 ? ' <span class="opacitylow">('.$langs->trans("maxNumberToProcess").': '.$batchlimit.")</span>" : "")  : ($langs->trans("SyncAborted", $i, $limit, ($flow['flowId'] ?? 'N/A')));
 
 		dol_syslog(__METHOD__ . " syncFlows end : ".$globalresultmessage, LOG_DEBUG, 0, "_pdpconnectfr");
 

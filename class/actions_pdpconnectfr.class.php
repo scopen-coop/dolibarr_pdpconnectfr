@@ -64,7 +64,8 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 		// Check if it's an invoice
 		if (get_class($invoiceObject) === 'Facture' && $thirdpartyCountryCode === 'FR') {
-			if (getDolGlobalString('PDPCONNECTFR_EINVOICE_IN_REAL_TIME')) { // TODO: Maybe generate only if status is validated
+			/** @var Facture $invoiceObject */
+			if ($invoiceObject->status != $invoiceObject::STATUS_DRAFT && getDolGlobalString('PDPCONNECTFR_EINVOICE_IN_REAL_TIME')) {
 				// Call function to create Factur-X document
 				require_once __DIR__ . '/protocols/ProtocolManager.class.php';
 
@@ -140,12 +141,13 @@ class ActionsPdpconnectfr extends CommonHookActions
 		// Add buttons in invoice card
 		if (in_array($object->element, ['facture'])) {
 			// Get current status of e-invoice
-			$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus($object->ref);
+			$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $object->ref);
 
 			$url_button = array();
 			if ($object->status == Facture::STATUS_VALIDATED || $object->status == Facture::STATUS_CLOSED) {
 				// if E-invoice is not generated, show button to generate e-invoice
-				if ($currentStatusDetails['code'] == $pdpConnectFr::STATUS_NOT_GENERATED) {
+				if ($currentStatusDetails['code'] == $pdpConnectFr::STATUS_NOT_GENERATED
+					|| !array_key_exists($currentStatusDetails['code'], $pdpConnectFr::STATUS_LABEL_KEYS)) {
 					$url_button[] = array(
 						'lang' => 'pdpconnectfr',
 						'enabled' => 1,
@@ -183,6 +185,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 				}
 			}
 
+			print '<!-- Current AP: '.getDolGlobalString('PDPCONNECTFR_PDP').' -->';
 			print dolGetButtonAction('', $langs->trans('einvoice'), 'default', $url_button, '', true);
 		}
 
@@ -254,7 +257,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 			$permissiontoedit = $user->hasRight('facture', 'write');
 
 			// Get current status of e-invoice
-			$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus($object->ref);
+			$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $object->ref);
 			// Action to set the E-invoice status manually
 			if ($action == 'seteinvoicestatus' && $permissiontoedit) {
 				$result = $pdpConnectFr->setEInvoiceStatus($object, GETPOSTINT('seteinvoicestatus'), '');
@@ -307,10 +310,8 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 				// Check configuration
 				$result = $pdpConnectFr->checkRequiredinformations($invoiceObject);
-
-				if ($result['res'] < 0) {			// Blocking error
+				if ($result['res'] < 0) {			// Blocking error, message contains at least one error and may also have warnings
 					$message = $langs->trans("InvoiceNotgeneratedDueToConfigurationIssues") . ': <br>' . $result['message'];
-					$this->warnings[] = $message;
 
 					dol_syslog(__METHOD__ . " " . $message);
 					setEventMessages($message, array(), 'errors');
@@ -322,25 +323,27 @@ class ActionsPdpconnectfr extends CommonHookActions
 				}
 
 				// Generate E-invoice by calling the method of the Protocol
-				$result = $protocol->generateInvoice($invoiceObject, $outputlangs);
-
-				if ($result && (!is_numeric($result) || $result > 0)) {
-					dol_syslog(__METHOD__ . " Invoice generated successfully for invoice ID " . $invoiceObject->id);
-					if (!empty($this->warnings)) {
-						setEventMessages($langs->trans("InvoiceGeneratedWithWarnings"), $this->warnings, 'warnings');
+				if (!$error) {
+					$result = $protocol->generateInvoice($invoiceObject, $outputlangs);
+					if ($result && (!is_numeric($result) || $result > 0)) {
+						dol_syslog(__METHOD__ . " Invoice generated successfully for invoice ID " . $invoiceObject->id);
+						if (!empty($this->warnings)) {
+							setEventMessages($langs->trans("InvoiceGeneratedWithWarnings"), $this->warnings, 'warnings');
+						} else {
+							setEventMessages($langs->trans("EInvoiceGenerated"), array(), 'mesgs');
+						}
 					} else {
-						setEventMessages($langs->trans("EInvoiceGenerated"), array(), 'mesgs');
+						// If there is an error, we move warnings into error message
+						$this->errors = array_merge($this->errors, $protocol->errors);
+						$this->errors = array_merge($this->errors, $this->warnings);
+						$this->warnings = array();
+						dol_syslog(__METHOD__ . " " . implode(',', $protocol->errors));
+						$error++;
 					}
-				} else {
-					// If there is an error, we move warnings into error message
-					$this->errors = array_merge($this->errors, $protocol->errors);
-					$this->errors = array_merge($this->errors, $this->warnings);
-					$this->warnings = array();
-					dol_syslog(__METHOD__ . " " . implode(',', $protocol->errors));
-					$error++;
 				}
 			}
 		}
+
 
 		if (isset($object->element) && in_array($object->element, ['invoice_supplier'])) {
 			$permissiontoedit = $user->hasRight('fournisseur', 'facture', 'creer');
@@ -747,7 +750,8 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 
 			// Einvoice generated or not
-			$einvoiceGenerated = $pdpConnectFr->fetchLastknownInvoiceStatus($obj->ref)['file'];
+			$tmparray = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $obj->ref);
+			$einvoiceGenerated = $tmparray['file'];
 			print '<td class="center tdoverflowmax125">';
 			if ($einvoiceGenerated) {
 				print '<i class="fas fa-check-circle" style="color:green;" title="'.$langs->trans('EInvoiceGeneratedList').'"></i>';
@@ -821,7 +825,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 		}
 
 		$pdpConnectFr = new PdpConnectFr($db);
-		$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus($object->ref);
+		$currentStatusDetails = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $object->ref);
 
 		// Block modification if invoice is already transmitted to PDP
 		if ($currentStatusDetails['transmitted'] == 1) {

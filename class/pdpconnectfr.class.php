@@ -161,7 +161,7 @@ class PdpConnectFr
 	/**
 	 * List of Einvoice status
 	 */
-	private const STATUS_LABEL_KEYS = [
+	public const STATUS_LABEL_KEYS = [
 		// Dolibarr
 		self::STATUS_UNKNOWN             => 'EInvStatusUnknown',
 		self::STATUS_IGNORE              => 'EInvStatusDoNotSync',		// To exclude invoice from einvoice sync
@@ -921,7 +921,7 @@ class PdpConnectFr
 		global $langs, $form, $user;
 		global $action;
 
-		$currentStatusInfo = $this->fetchLastknownInvoiceStatus($object->ref, $object->id);
+		$currentStatusInfo = $this->fetchLastknownInvoiceStatus($object->id, $object->ref);
 		// Force value for test
 		//$currentStatusInfo['code'] = 2;
 
@@ -999,11 +999,13 @@ class PdpConnectFr
 		$resprints .= '</td>';
 		$resprints .= '<td>';
 		if ($action == 'editeinvoicestatus' || $action == 'create') {
-			$resprints .=  '<form name="seteinvoicestatus" action="' . $_SERVER["PHP_SELF"] . '?id=' . $object->id . '" method="post">';
-			$resprints .=  '<input type="hidden" name="token" value="' . newToken() . '">';
-			$resprints .=  '<input type="hidden" name="action" value="seteinvoicestatus">';
-			$resprints .=  '<input type="hidden" name="page_y" value="page_y">';
-			//$resprints .=  '<input type="hidden" name="backtopage" value="' . $backtopage . '">';
+			if ($action != 'create') {
+				$resprints .=  '<form name="seteinvoicestatus" action="' . $_SERVER["PHP_SELF"] . '?id=' . $object->id . '" method="post">';
+				$resprints .=  '<input type="hidden" name="token" value="' . newToken() . '">';
+				$resprints .=  '<input type="hidden" name="action" value="seteinvoicestatus">';
+				$resprints .=  '<input type="hidden" name="page_y" value="page_y">';
+				//$resprints .=  '<input type="hidden" name="backtopage" value="' . $backtopage . '">';
+			}
 
 			// TODO Use a combo list with only status for sync Dolibarr -> AP
 			// Also status we can't modify manually must be greyed/disabled
@@ -1012,8 +1014,8 @@ class PdpConnectFr
 			$resprints .=  $form->selectarray("seteinvoicestatus", $arrayofeinvoicestatus, $currentStatusInfo['code'], 0, 0, 0, '', 1);
 			if ($action != 'create') {
 				$resprints .=  '<input type="submit" class="button button-edit smallpaddingimp reposition" value="' . $langs->trans('Modify') . '">';
+				$resprints .=  '</form>';
 			}
-			$resprints .=  '</form>';
 		} else {
 			$resprints .= '<span id="einvoice-status">';
 			$resprints .= $currentStatusInfo['status'] . '</span><br>';
@@ -1038,13 +1040,15 @@ class PdpConnectFr
 			$resprints .= '
             <script type="text/javascript">
             (function() {
+				var countCheckInvoiceStatus = 1;
                 function checkInvoiceStatus() {
-					console.log("checkInvoiceStatus Checking invoice status...");
+					console.log("checkInvoiceStatus Checking invoice status ("+countCheckInvoiceStatus+")...");
                     // alert("Checking invoice status...");
                     $.get("' . $urlajax . '", {
                         token: "' . currentToken() . '",
                         ref: "' . dol_escape_js($object->ref) . '"
                     }, function (data) {
+						/* code is executed here if response is valid json */
                         if (!data || typeof data.code === "undefined") {
 							console.log("checkInvoiceStatus no data returned");
                             return;
@@ -1058,8 +1062,13 @@ class PdpConnectFr
                         $("#einvoice-info").html(data.info || "");
 
                         // Retry only if still awaiting validation
-                        if (parseInt(data.code, 10) === ' . self::STATUS_AWAITING_VALIDATION . ') {
-                            setTimeout(checkInvoiceStatus, 5000);
+                        if (parseInt(data.code) === ' . self::STATUS_AWAITING_VALIDATION . ') {
+							countCheckInvoiceStatus++;
+							if (countCheckInvoiceStatus <= 5) {
+                            	setTimeout(checkInvoiceStatus, 5000);
+							} else if (countCheckInvoiceStatus <= 10) {
+                            	setTimeout(checkInvoiceStatus, 10000);
+							}
                         }
                     }, "json");
                 }
@@ -1441,11 +1450,11 @@ class PdpConnectFr
 	/**
 	 * fetchLastknownInvoiceStatus
 	 *
-	 * @param string		$invoiceRef		Invoice ref
 	 * @param int			$invoiceId		Invoice ID
+	 * @param string		$invoiceRef		Invoice ref
 	 * @return string[]|number[]|mixed[][]|mixed[]
 	 */
-	public function fetchLastknownInvoiceStatus($invoiceRef, $invoiceId = 0)
+	public function fetchLastknownInvoiceStatus($invoiceId = 0, $invoiceRef = '')
 	{
 		global $conf;
 

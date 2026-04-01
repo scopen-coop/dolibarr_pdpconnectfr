@@ -328,6 +328,15 @@ class FacturXProtocol extends AbstractProtocol
 		$facturxpdf->setDocumentSupplyChainEvent(new DateTime($deliveryDateList[0]));
 
 
+		// Add data of project if invoice is into a project
+		if (! ($invoice->project instanceOf Project)) {
+			$invoice->fetchProject();
+		}
+		if ($invoice->project instanceOf Project) {
+			$facturxpdf->setDocumentProcuringProject($invoice->project->ref, $invoice->project->title);
+		}
+
+
 		// Add additional referenced documents (Order references) - Disabled for Chorus
 		// Not for chorus : has been rejected for the reason identified in lifecycle: L'element (AttachmentBinaryObject.value) est obligatoire si l'element (FichierXml.SupplyChainTradeTransaction.ApplicableHeaderTradeAgreement.AdditionalReferencedDocument) est renseigne.
 		if (!$chorus) { // TODO : check this condition
@@ -370,21 +379,32 @@ class FacturXProtocol extends AbstractProtocol
 			// 	$facturxpdf->setDocumentBuyerContact($object->contact->getFullName($outputlangs), "", $object->contact->phone ?: $object->contact->phone_mobile, $object->contact->fax, $object->contact->email);	// If contactPersonName is set, contactDepartmentNamemust not be set.
 		}
 
+
 		// Set Buyer Reference (Service Code for Chorus) and Contract References
 		if (!empty($object->array_options['options_d4d_service_code'])) {
 			// CHORUS Debtor. Service Code
 			$facturxpdf->setDocumentBuyerReference($object->array_options['options_d4d_service_code']);
 		}
 
+		// Add data of contract if invoice is linked to a contract
 		// CHORUS Commitment. Contract Number
 		if (!empty($object->array_options['options_d4d_contract_number'])) {
 			$facturxpdf->setDocumentContractReferencedDocument($object->array_options['options_d4d_contract_number']);
 		}
+		/*
+		if (! ($invoice->contract instanceOf Contract)) {
+			$invoice->fetchProject();
+		}
+		if ($invoice->contract instanceOf Contract) {
+			$facturxpdf->setDocumentContractReferencedDocument($invoice->contract->ref)
+		}
+		*/
 
 		// CHORUS Commitment. Commitment Number / Client Ref
 		if (!empty($promise_code)) {
 			$facturxpdf->setDocumentBuyerOrderReferencedDocument($promise_code);
 		}
+
 
 		// Set Business Process ID according to invoice type
 		$facturxpdf->setDocumentBusinessProcess($this->getBillingProcessID($object));
@@ -572,12 +592,16 @@ class FacturXProtocol extends AbstractProtocol
 			// K: Intracomm sale
 			// G: Export outside of EU
 			if ($line->tva_tx > 0) {
-				$categoryVAT = 'S';
-
 				// Check if seller has a VAT number.
 				if (empty($mysoc->tva_intra)) {
 					throw new Exception('BADVATNUMBER: The VAT number of the thirdparty '.$object->thirdparty->name.' is mandatory when there is a non null VAT on at least on line.');
 				}
+				// Check if VAT is in a valid range (BR-FR-16)
+				if (!$this->checkIfVatRateIsValid($line->tva_tx, $mysoc->country_code)) {
+					throw new Exception('BADVATRATE[BR-FR-16]: The VAT rate '.$line->tva_tx.' on line '.$line->id.' is not a valid string value for country '.$mysoc->country_code.'.');
+				}
+
+				$categoryVAT = 'S';
 
 				$facturxpdf->addDocumentPositionTax($categoryVAT, 'VAT', $line->tva_tx);
 			} else {
@@ -987,15 +1011,17 @@ class FacturXProtocol extends AbstractProtocol
 
 
 		$documentBuilder->setDocumentBillingPeriod(DateTime::createFromFormat("Ymd", "20250101"), DateTime::createFromFormat("Ymd", "20250131"), "01.01.2025 - 31.01.2025");
-		$documentBuilder->addDocumentInvoiceSupportingDocumentWithUri('REFDOC-2024/00001-1', 'http.//some.url', 'Inhaltsstoffe Joghurt');
 
+		$documentBuilder->addDocumentInvoiceSupportingDocumentWithUri('FA2401-000001', 'https://publiclinktoinvoice', 'LISIBLE');
+		$documentBuilder->addDocumentInvoiceSupportingDocumentWithUri('SO2401-000001', 'https://linktoorder', 'BON_COMMANDE');
 		//$documentBuilder->addDocumentInvoiceSupportingDocumentWithFile('REFDOC-2024/00001-2', $AdditionalDocument, 'Herkunftsnachweis Trennblätter');
 
 		$documentBuilder->addDocumentTenderOrLotReferenceDocument('LOS 738625');
 		$documentBuilder->addDocumentInvoicedObjectReferenceDocument('125', ZugferdReferenceCodeQualifiers::SALE_PERS_NUMB); // Sales person number
 
-		$documentBuilder->setDocumentContractReferencedDocument('CON-2024/2025-001');
-		$documentBuilder->setDocumentProcuringProject('PROJ-2025-001-1', 'Allgemeine Dienstleistungen');
+		$documentBuilder->setDocumentContractReferencedDocument('CO2401-000001');			// Ref of contract
+
+		$documentBuilder->setDocumentProcuringProject('PR2401-000001', 'Project label');	// Ref of project
 
 		$documentBuilder->addDocumentPaymentMeanToDirectDebit("DE12500105170648489890", "INV-TEST");
 		$documentBuilder->addDocumentPaymentTerm('Wird von Konto DE12500105170648489890 abgebucht', DateTime::createFromFormat("Ymd", "20250131"), 'MANDATE-2024/000001');
@@ -1028,23 +1054,41 @@ class FacturXProtocol extends AbstractProtocol
 		$documentBuilder->setDocumentPositionProductDetails("Trennblätter A4", "50er Pack", "TB100A4");
 		$documentBuilder->setDocumentPositionNetPrice(9.9000);
 		$documentBuilder->setDocumentPositionQuantity(20, ZugferdUnitCodes::REC20_PIECE);
-		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 19);
+		$vatrate = 20;
+		if (!$this->checkIfVatRateIsValid($vatrate, $mysoc->country_code)) {
+			throw new Exception('BADVATRATE: The VAT rate '.$vatrate.' on line is not a valid string value for country '.$mysoc->country_code.'.');
+		}
+		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, $vatrate);
 		$documentBuilder->setDocumentPositionLineSummation(198.0);
+
 		$documentBuilder->addNewPosition("2");
 		$documentBuilder->setDocumentPositionProductDetails("Joghurt Banane", "B-Ware", "ARNR2");
 		$documentBuilder->setDocumentPositionNetPrice(5.5000);
 		$documentBuilder->setDocumentPositionQuantity(50, ZugferdUnitCodes::REC20_PIECE);
-		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 7);
+		$vatrate = 7;
+		if (!$this->checkIfVatRateIsValid($vatrate, $mysoc->country_code)) {
+			throw new Exception('BADVATRATE: The VAT rate '.$vatrate.' on line is not a valid string value for country '.$mysoc->country_code.'.');
+		}
+		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, $vatrate);
 		$documentBuilder->setDocumentPositionLineSummation(275.0);
+
 		$documentBuilder->addNewPosition("3");
 		$documentBuilder->setDocumentPositionProductDetails("Joghurt Erdbeer", "", "ARNR3");
 		$documentBuilder->setDocumentPositionNetPrice(4.0000);
 		$documentBuilder->setDocumentPositionQuantity(100, ZugferdUnitCodes::REC20_PIECE);
-		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 7);
+		$vatrate = 7;
+		if (!$this->checkIfVatRateIsValid($vatrate, $mysoc->country_code)) {
+			throw new Exception('BADVATRATE: The VAT rate '.$vatrate.' on line is not a valid string value for country '.$mysoc->country_code.'.');
+		}
+		$documentBuilder->addDocumentPositionTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, $vatrate);
+
 		$documentBuilder->setDocumentPositionLineSummation(400.0);
-		$documentBuilder->addDocumentTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 198.0, 37.62, 19.0);
+
+		// Add total of vat per vat rate
+		$documentBuilder->addDocumentTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 198.0, 39.60, 20.0);
 		$documentBuilder->addDocumentTax(ZugferdVatCategoryCodes::STAN_RATE, ZugferdVatTypeCodes::VALUE_ADDED_TAX, 675.0, 47.25, 7.0);
-		$documentBuilder->setDocumentSummation(957.87, 957.87, 873.00, 0.0, 0.0, 873.00, 84.87);
+
+		$documentBuilder->setDocumentSummation(959.85, 959.85, 873.00, 0.0, 0.0, 873.00, 86.85);
 
 
 		// This is a test doc
@@ -2943,5 +2987,28 @@ class FacturXProtocol extends AbstractProtocol
 		}
 
 		return array('res' => 1, 'message' => 'Attachment saved successfully ' . $dest_path);
+	}
+
+
+	/**
+	 * Check if a given VAT rate is valid for a specific country based on the c_tva table in the database.
+	 *
+	 * @param 	string	$vatrate		Vat rate to check (e.g. '20' for 20%)
+	 * @param 	string	$countryCode	Country code to check the VAT rate against (e.g. 'FR' for France)
+	 * @return 	boolean					Returns true if the VAT rate is valid for the given country, false otherwise.
+	 * TODO Move common function into an implemented CommonXProtocol.class.php if needed by other protocol handlers
+	 */
+	public function checkIfVatRateIsValid($vatrate, $countryCode)
+	{
+		if ($countryCode == 'FR') {
+			// Check rule BR-FR-16 For AFNOR Einvoice - List in XP-Z12-012
+			$validRatesString = ['0', '10', '13', '20', '8.5', '19.6', '2.1', '5.5', '7', '20.6', '1.05', '0.9', '1.75', '9.2', '9.6'];
+			//$valtotest = price2num((float) $vatrate, '', 1);
+			if (!in_array($vatrate, $validRatesString)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 }

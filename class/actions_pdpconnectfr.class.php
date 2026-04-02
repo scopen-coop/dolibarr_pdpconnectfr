@@ -71,7 +71,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 				$usedProtocols = getDolGlobalString('PDPCONNECTFR_PROTOCOL');
 				$ProtocolManager = new ProtocolManager($db);
-				$protocol = $ProtocolManager->getprotocol($usedProtocols);
+				$protocol = $ProtocolManager->getProtocol($usedProtocols);
 
 				// Check configuration
 				$result = $pdpConnectFr->checkRequiredinformations($invoiceObject);
@@ -118,7 +118,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 
 	/**
-	 * Overload the addMoreMassActions function : replacing the parent's function with the one below
+	 * Overload the addMoreActionsButtons function : replacing the parent's function with the one below
 	 *
 	 * @param	array<string,mixed>	$parameters     Hook metadata (context, etc...)
 	 * @param	CommonObject		$object         The object to process (an invoice if you are in invoice module, a propale in propale's module, etc...)
@@ -306,7 +306,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 				$usedProtocols = getDolGlobalString('PDPCONNECTFR_PROTOCOL');
 				$ProtocolManager = new ProtocolManager($db);
-				$protocol = $ProtocolManager->getprotocol($usedProtocols);
+				$protocol = $ProtocolManager->getProtocol($usedProtocols);
 
 				// Check configuration
 				$result = $pdpConnectFr->checkRequiredinformations($invoiceObject);

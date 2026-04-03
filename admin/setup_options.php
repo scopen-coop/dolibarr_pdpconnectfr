@@ -229,6 +229,7 @@ $item->cssClass = 'minwidth500';
 $item->fieldParams['forcereload'] = 1;
 
 if (getDolGlobalString('PDPCONNECTFR_EINVOICE_IN_REAL_TIME')) {
+	// TODO : Remove this conf or add more conditions like thirdparty nature to avoid blocking invoice creation for non FR companies or for thirdparties that are not subject to E-invoicing obligation 
 	$item = $formSetup->newItem('PDPCONNECTFR_EINVOICE_CANCEL_IF_EINVOICE_FAILS')->setAsYesNo();
 	$item->helpText = $langs->transnoentities('PDPCONNECTFR_EINVOICE_CANCEL_IF_EINVOICE_FAILS').'<br>'.$langs->transnoentities('PDPCONNECTFR_EINVOICE_CANCEL_IF_EINVOICE_FAILS2');
 	$item->defaultFieldValue = 0;
@@ -241,6 +242,12 @@ $item->helpText = $langs->transnoentities('PDPCONNECTFR_BLOCK_INVOICE_NO_ROUTING
 $item->defaultFieldValue = 0;
 $item->cssClass = 'minwidth500';
 $item->fieldParams['forcereload'] = 0;
+
+// Setup conf to enable third-party validation via government APIs (SIREN via data.gouv.fr and VAT via VIES)
+$item = $formSetup->newItem('PDPCONNECTFR_ENABLE_API_VALIDATION')->setAsYesNo();
+$item->helpText = $langs->transnoentities('PDPCONNECTFR_ENABLE_API_VALIDATION_HELP');
+$item->defaultFieldValue = 0;
+$item->cssClass = 'minwidth500';
 
 // Setup conf for PMT - Mention regarding recovery fees
 $item = $formSetup->newItem('PDPCONNECTFR_PMT');

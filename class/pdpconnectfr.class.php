@@ -992,6 +992,37 @@ class PdpConnectFr
 	}
 
 	/**
+	 * Validate invoice-level configuration for E-Invoicing.
+	 * Checks constraints specific to the invoice itself (type, linked documents...).
+	 *
+	 * @param Facture $invoice   Invoice object
+	 * @return array{res:int, message:string} Returns array with 'res' (1 on success, -1 on error and 0 on warning) and info 'message'
+	 */
+	public function validateInvoiceConfiguration($invoice)
+	{
+		global $langs;
+
+		$res = 1;
+		$message = '';
+		$baseErrors = [];
+
+		// Credit note: BT-25 (InvoiceReferencedDocument) is mandatory per EN16931
+		// The source invoice reference must be set in fk_facture_source
+		if ($invoice->type == $invoice::TYPE_CREDIT_NOTE) {
+			if (empty($invoice->fk_facture_source)) {
+				$baseErrors[] = $langs->trans("FxCheckErrorCreditNoteNoSource");
+			}
+		}
+
+		if (!empty($baseErrors)) {
+			$res = -1;
+			$message .= '<br> Error: ' . implode('<br> Error: ', $baseErrors);
+		}
+
+		return ['res' => $res, 'message' => $message];
+	}
+
+	/**
 	 * Check required information for E-Invoicing
 	 *
 	 * @param Facture 	$invoice   Invoice object
@@ -1000,9 +1031,10 @@ class PdpConnectFr
 	public function checkRequiredinformations($invoice)
 	{
 		$messages = [];
-		$mysocConfigCheck   = $this->validateMyCompanyConfiguration();
-		$socConfigCheck     = $this->validatethirdpartyConfiguration($invoice->thirdparty);
-		$chorusConfigCheck  = null;
+		$mysocConfigCheck    = $this->validateMyCompanyConfiguration();
+		$socConfigCheck      = $this->validatethirdpartyConfiguration($invoice->thirdparty);
+		$invoiceConfigCheck  = $this->validateInvoiceConfiguration($invoice);
+		$chorusConfigCheck   = null;
 		if (getDolGlobalInt('PDPCONNECTFR_USE_CHORUS')) {
 			$chorusConfigCheck = $this->validateChorusInformations($invoice);
 		}
@@ -1020,6 +1052,9 @@ class PdpConnectFr
 		if (!empty($socConfigCheck['message'])) {
 			$messages[] = $socConfigCheck['message'];
 		}
+		if (!empty($invoiceConfigCheck['message'])) {
+			$messages[] = $invoiceConfigCheck['message'];
+		}
 		if (!empty($chorusConfigCheck['message'])) {
 			$messages[] = $chorusConfigCheck['message'];
 		}
@@ -1028,9 +1063,12 @@ class PdpConnectFr
 		}
 
 		$res = 1;
-		if ($mysocConfigCheck['res'] === -1 || $socConfigCheck['res'] === -1 || (isset($chorusConfigCheck) && $chorusConfigCheck['res'] === -1)) {
+		if ($mysocConfigCheck['res'] === -1 || $socConfigCheck['res'] === -1
+			|| $invoiceConfigCheck['res'] === -1
+			|| (isset($chorusConfigCheck) && $chorusConfigCheck['res'] === -1)) {
 			$res = -1;
 		} elseif ($mysocConfigCheck['res'] === 0 || $socConfigCheck['res'] === 0
+			|| $invoiceConfigCheck['res'] === 0
 			|| (isset($chorusConfigCheck) && $chorusConfigCheck['res'] === 0)
 			|| (isset($apiConfigCheck) && $apiConfigCheck['res'] === 0)) {
 			$res = 0;
@@ -1610,11 +1648,9 @@ class PdpConnectFr
 		if ($resql) {
 			if ($this->db->num_rows($resql) > 0) {
 				$obj = $this->db->fetch_object($resql);
-				$status = array(
-					'code' => (int) $obj->syncstatus,
-					'status' => $this->getStatusLabel((int) $obj->syncstatus),
-					'info' => $obj->synccomment ?? ''
-				);
+				$status['code'] = (int) $obj->syncstatus;
+				$status['status'] = $this->getStatusLabel((int) $obj->syncstatus);
+				$status['info'] = $obj->synccomment ?? '';
 				if (!in_array((int) $obj->syncstatus, array(self::STATUS_UNKNOWN, self::STATUS_IGNORE, self::STATUS_NOT_GENERATED, self::STATUS_GENERATED))) {
 					$status['transmitted'] = 1;
 				} else {

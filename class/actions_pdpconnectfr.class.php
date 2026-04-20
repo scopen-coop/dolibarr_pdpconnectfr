@@ -353,10 +353,11 @@ class ActionsPdpconnectfr extends CommonHookActions
 						}
 					} else {
 						// If there is an error, we move warnings into error message
-						$this->errors = array_merge($this->errors, $protocol->errors);
-						$this->errors = array_merge($this->errors, $this->warnings);
+						// Cast to array to avoid TypeError on PHP 8 when property is null
+						$this->errors = array_merge($this->errors, (array) $protocol->errors);
+						$this->errors = array_merge($this->errors, (array) $this->warnings);
 						$this->warnings = array();
-						dol_syslog(__METHOD__ . " " . implode(',', $protocol->errors));
+						dol_syslog(__METHOD__ . " " . implode(',', (array) $protocol->errors));
 						$error++;
 					}
 				}
@@ -415,9 +416,13 @@ class ActionsPdpconnectfr extends CommonHookActions
 	 * @param Hookmanager	$hookmanager	Hook manager
 	 * @return number
 	 */
-	public function formConfirm($parameters, &$object, &$action, $hookmanager)
+	public function formConfirm($parameters, $object, &$action, $hookmanager)
 	{
 		global $db, $langs, $form;
+
+		if (empty($object->element)) {
+			return 0;
+		}
 
 		$pdpConnectFr = new PdpConnectFr($db);
 		$checkConfig = $pdpConnectFr->checkModulePrerequisites();
@@ -426,7 +431,6 @@ class ActionsPdpconnectfr extends CommonHookActions
 			return 0;
 		}
 		$langs->load("pdpconnectfr@pdpconnectfr");
-
 
 		if (in_array($object->element, ['invoice_supplier'])) {
 			// Clone confirmation

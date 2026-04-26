@@ -270,6 +270,16 @@ class ActionsPdpconnectfr extends CommonHookActions
 				}
 			}
 
+			// Action to set an invoice-level routing ID override
+			if ($action == 'setoverriderouting' && $permissiontoedit) {
+				$overrideRoutingId = GETPOST('override_routing_id', 'alphanohtml');
+				$result = $pdpConnectFr->insertOrUpdateExtLink($object->id, $object->element, '', $currentStatusDetails['code'], $object->ref, $currentStatusDetails['info'], $overrideRoutingId);
+				if ($result < 0) {
+					$error++;
+					$this->errors = array_merge($this->errors, $pdpConnectFr->errors);
+				}
+			}
+
 			// Action to send invoice to PDP
 			if ($action == 'send_to_pdp' && $permissiontoedit
 				&& $currentStatusDetails['file'] == 1
@@ -389,16 +399,67 @@ class ActionsPdpconnectfr extends CommonHookActions
 		if (in_array('thirdpartycard', $contexts)) {
 			$permissiontoedit = $user->hasRight('societe', 'creer');
 
-			if (($action == 'add' || $action == 'update') && !empty($object->id) && $permissiontoedit) {
-				$result = $pdpConnectFr->setDefaultRouting($object->id, GETPOST('routing_id', 'aZ09'), '', '', '', 'thirdparty');
-				if ($result < 0) {
-					$error++;
-					setEventMessages('Failed to save routing ID', null, 'errors');
+			// $object->id may be empty at hook time if core hasn't fetched the object yet
+			$socId = !empty($object->id) ? (int) $object->id : GETPOSTINT('id');
+
+			// Save routing from create/edit thirdparty form
+			if (($action == 'add' || $action == 'update') && !empty($socId) && $permissiontoedit) {
+				// Thirdparty routing ID
+				$routingId = GETPOST('routing_id', 'alphanohtml');
+				if ($routingId !== '') {
+					$existing = $pdpConnectFr->fetchDefaultRouting($socId, 'thirdparty');
+					if (empty($existing)) {
+						$result = $pdpConnectFr->addRouting($socId, $routingId);
+					} else {
+						$result = $pdpConnectFr->setDefaultRouting($socId, $routingId, '', '', '', 'thirdparty');
+					}
+					if ($result < 0) {
+						$error++;
+						setEventMessages($langs->trans('FailedToSaveRoutingID'), null, 'errors');
+					}
 				}
-				$result = $pdpConnectFr->setDefaultRouting($object->id, GETPOST('routing_product_id', 'aZ09'), '', '', '', 'product');
+				// Default product for import
+				$result = $pdpConnectFr->setDefaultRouting($socId, GETPOST('routing_product_id', 'aZ09'), '', '', '', 'product');
 				if ($result < 0) {
 					$error++;
-					setEventMessages('Failed to save routing ID', null, 'errors');
+					setEventMessages($langs->trans('FailedToSaveRoutingID'), null, 'errors');
+				}
+			}
+
+			// Add a new routing entry
+			if ($action == 'pdp_addrouting' && !empty($socId) && $permissiontoedit) {
+				$newRoutingId = GETPOST('new_routing_id', 'alphanohtml');
+				$newRoutingInfo = GETPOST('new_routing_info', 'alphanohtml');
+				if (!empty($newRoutingId)) {
+					$result = $pdpConnectFr->addRouting($socId, $newRoutingId, $newRoutingInfo);
+					if ($result < 0) {
+						$error++;
+						setEventMessages($langs->trans('FailedToSaveRoutingID'), null, 'errors');
+					}
+				}
+			}
+
+			// Delete a routing entry
+			if ($action == 'pdp_deleterouting' && !empty($socId) && $permissiontoedit) {
+				$routingRowid = GETPOSTINT('routing_rowid');
+				if ($routingRowid > 0) {
+					$result = $pdpConnectFr->deleteRouting($routingRowid, $socId);
+					if ($result < 0) {
+						$error++;
+						setEventMessages($langs->trans('FailedToDeleteRoutingID'), null, 'errors');
+					}
+				}
+			}
+
+			// Set a routing entry as default
+			if ($action == 'pdp_setdefaultrouting' && !empty($socId) && $permissiontoedit) {
+				$routingRowid = GETPOSTINT('routing_rowid');
+				if ($routingRowid > 0) {
+					$result = $pdpConnectFr->setRoutingAsDefault($routingRowid, $socId);
+					if ($result < 0) {
+						$error++;
+						setEventMessages($langs->trans('FailedToSetDefaultRoutingID'), null, 'errors');
+					}
 				}
 			}
 		}
@@ -527,6 +588,37 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 
 	/**
+	 * Complete the $arrayfields with custom fields to be able to use them in list views (like thirdparty or invoice list)
+	 *
+	 * @param array<string,mixed> 	$parameters		Array of parameters
+	 * @param CommonObject			$object			Object invoice
+	 * @param string		 		$action			Code action
+	 * @param Hookmanager			$hookmanager	Hookmanager
+	 * @return int									Result
+	 */
+	public function completeArrayFields($parameters, &$object, &$action, $hookmanager)
+	{
+		if (in_array('invoicelist', explode(':', $parameters['context']))) {
+			// Add fields to invoice list
+			$parameters['arrayfields']['einvoicegenerated'] = array(
+				'label' => 'EInvoiceFile',
+				'checked' => -1,
+				'position' => 900,
+				'enabled' => 1,
+				'perms' => '1'
+			);
+			$parameters['arrayfields']['pdp_syncstatus'] = array(
+				'label' => 'PDPSyncStatus',
+				'checked' => 1,
+				'position' => 901,
+				'enabled' => '1',
+				'perms' => '1'
+			);
+		}
+	}
+
+
+	/**
 	 * Add SELECT fields
 	 *
 	 * @param array<string,mixed> 	$parameters		Array of parameters
@@ -631,43 +723,6 @@ class ActionsPdpconnectfr extends CommonHookActions
 
 
 	/**
-	 * Column titles
-	 *
-	 * @param array<string,mixed> 	$parameters		Array of parameters
-	 * @param CommonObject			$object			Object invoice
-	 * @param string		 		$action			Code action
-	 * @param Hookmanager			$hookmanager	Hookmanager
-	 * @return int									Result
-	 */
-	public function printFieldListTitle($parameters, &$object, &$action, $hookmanager)
-	{
-		global $langs;
-
-		if (in_array('invoicelist', explode(':', $parameters['context']))) {
-			// Einvoice generated or not
-			print print_liste_field_titre($langs->transnoentitiesnoconv('EInvoiceFile'), '', '', '', $parameters['param'] ?? '', '', $parameters['sortfield'] ?? '', $parameters['sotorder'] ?? '', 'center ');
-
-			// syncstatus
-			print print_liste_field_titre($langs->transnoentitiesnoconv('PDPSyncStatus'), '', '', '', $parameters['param'] ?? '', '', $parameters['sortfield'] ?? '', $parameters['sotorder'] ?? '', 'center ');
-		}
-
-		// Supplier invoice list, Product list, Soc list
-		$contexts = explode(':', $parameters['context']);
-		if (array_intersect(
-			$contexts,
-			['supplierinvoicelist', 'thirdpartylist', 'productservicelist', 'societelist']
-		)) {
-			print print_liste_field_titre($langs->transnoentitiesnoconv('pdpconnectfrSourceTitle'));
-		}
-
-		if (in_array('thirdpartylist', $contexts, true)) {
-			print print_liste_field_titre($langs->transnoentitiesnoconv('pdpconnectfrThirdPartyRoutingTitle'));
-		}
-
-		return 0;
-	}
-
-	/**
 	 * Filter options
 	 *
 	 * @param array<string,mixed> 	$parameters		Array of parameters
@@ -678,14 +733,9 @@ class ActionsPdpconnectfr extends CommonHookActions
 	 */
 	public function printFieldListOption($parameters, &$object, &$action, $hookmanager)
 	{
-		global  $form, $db;
-		if (in_array('invoicelist', explode(':', $parameters['context']))) {
-			// Einvoice generated or not
-			print '<td class="liste_titre">';
-			print '&nbsp;';
-			print '</td>';
+		global $form, $db;
 
-			// syncstatus
+		if (in_array('invoicelist', explode(':', $parameters['context']))) {
 			$pdpConnectFr = new PdpConnectFr($db);
 			$checkConfig = $pdpConnectFr->checkModulePrerequisites();
 			if ($checkConfig < 0) {
@@ -693,29 +743,38 @@ class ActionsPdpconnectfr extends CommonHookActions
 				return 0;
 			}
 
-			$listofoptions = $pdpConnectFr->getEinvoiceStatusOptions();
+			// Einvoice generated or not
+			if (!empty($parameters['arrayfields']['einvoicegenerated']['checked'])) {
+				print '<td class="liste_titre einvoicegenerated">';
+				print '</td>';
+			}
 
-			// Remove option related to E-invoice generation status
-			unset($listofoptions[$pdpConnectFr::STATUS_NOT_GENERATED]);
-			unset($listofoptions[$pdpConnectFr::STATUS_GENERATED]);
-			unset($listofoptions[$pdpConnectFr::STATUS_UNKNOWN]);
+			// Sync status
+			if (empty($parameters['arrayfields']['pdp_syncstatus']) || !empty($parameters['arrayfields']['pdp_syncstatus']['checked'])) {
+				print '<td class="liste_titre pdp_syncstatus">';
+				$listofoptions = $pdpConnectFr->getEinvoiceStatusOptions(0, 0, 0, 0, 1, 1);
 
-			print '<td class="liste_titre">';
-			print $form->selectarray(
-				'search_pdp_syncstatus',
-				$listofoptions,
-				GETPOST('search_pdp_syncstatus', 'alpha'),
-				-2,
-				0,
-				0,
-				'',
-				0,
-				0,
-				0,
-				'',
-				'width100 '
-			);
-			print '</td>';
+				// Remove option related to E-invoice generation status
+				//unset($listofoptions[$pdpConnectFr::STATUS_NOT_GENERATED]);
+				//unset($listofoptions[$pdpConnectFr::STATUS_GENERATED]);
+				unset($listofoptions[$pdpConnectFr::STATUS_UNKNOWN]);
+
+				print $form->selectarray(
+					'search_pdp_syncstatus',
+					$listofoptions,
+					GETPOST('search_pdp_syncstatus', 'alpha'),
+					-2,
+					0,
+					0,
+					'',
+					0,
+					0,
+					0,
+					'',
+					'width100 '
+				);
+				print '</td>';
+			}
 		}
 
 		// Supplier invoice list, Product list, Soc list
@@ -754,6 +813,56 @@ class ActionsPdpconnectfr extends CommonHookActions
 		return 0;
 	}
 
+
+	/**
+	 * Column titles
+	 *
+	 * @param array<string,mixed> 	$parameters		Array of parameters
+	 * @param CommonObject			$object			Object invoice
+	 * @param string		 		$action			Code action
+	 * @param Hookmanager			$hookmanager	Hookmanager
+	 * @return int									Result
+	 */
+	public function printFieldListTitle($parameters, &$object, &$action, $hookmanager)
+	{
+		global $db, $langs;
+
+		if (in_array('invoicelist', explode(':', $parameters['context']))) {
+			$pdpConnectFr = new PdpConnectFr($db);
+			$checkConfig = $pdpConnectFr->checkModulePrerequisites();
+			if ($checkConfig < 0) {
+				dol_syslog(__METHOD__ . "PDPCONNECTFR Module is not correctly configured.");
+				return 0;
+			}
+
+			// Einvoice generated or not
+			if (!empty($parameters['arrayfields']['einvoicegenerated']['checked'])) {
+				print print_liste_field_titre($langs->transnoentitiesnoconv('EInvoiceFile'), '', '', '', $parameters['param'] ?? '', '', $parameters['sortfield'] ?? '', $parameters['sotorder'] ?? '', 'center ');
+			}
+
+			// syncstatus
+			if (empty($parameters['arrayfields']['pdp_syncstatus']) || !empty($parameters['arrayfields']['pdp_syncstatus']['checked'])) {
+				print print_liste_field_titre($langs->transnoentitiesnoconv('PDPSyncStatus'), '', '', '', $parameters['param'] ?? '', '', $parameters['sortfield'] ?? '', $parameters['sotorder'] ?? '', 'center ');
+			}
+		}
+
+		// Supplier invoice list, Product list, Soc list
+		$contexts = explode(':', $parameters['context']);
+		if (array_intersect(
+			$contexts,
+			['supplierinvoicelist', 'thirdpartylist', 'productservicelist', 'societelist']
+		)) {
+			print print_liste_field_titre($langs->transnoentitiesnoconv('pdpconnectfrSourceTitle'));
+		}
+
+		if (in_array('thirdpartylist', $contexts, true)) {
+			print print_liste_field_titre($langs->transnoentitiesnoconv('pdpconnectfrThirdPartyRoutingTitle'));
+		}
+
+		return 0;
+	}
+
+
 	/**
 	 * Row values
 	 *
@@ -770,7 +879,6 @@ class ActionsPdpconnectfr extends CommonHookActions
 		if (in_array('invoicelist', explode(':', $parameters['context']))) {
 			$obj = $parameters['obj'];
 
-
 			$pdpConnectFr = new PdpConnectFr($db);
 			$checkConfig = $pdpConnectFr->checkModulePrerequisites();
 			if ($checkConfig < 0) {
@@ -778,26 +886,29 @@ class ActionsPdpconnectfr extends CommonHookActions
 				return 0;
 			}
 
-
 			// Einvoice generated or not
-			$tmparray = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $obj->ref);
-			$einvoiceGenerated = $tmparray['file'];
-			print '<td class="center tdoverflowmax125">';
-			if ($einvoiceGenerated) {
-				print '<i class="fas fa-check-circle" style="color:green;" title="'.$langs->trans('EInvoiceGeneratedList').'"></i>';
-			}
-			print '</td>';
-			if (isset($parameters['i']) && empty($parameters['i'])) {
-				$parameters['totalarray']['nbfield']++;
+			if (!empty($parameters['arrayfields']['einvoicegenerated']['checked'])) {
+				$tmparray = $pdpConnectFr->fetchLastknownInvoiceStatus(0, $obj->ref);
+				$einvoiceGenerated = $tmparray['file'];
+				print '<td class="center tdoverflowmax125">';
+				if ($einvoiceGenerated) {
+					print '<i class="fas fa-check-circle" style="color:green;" title="'.$langs->trans('EInvoiceGenerated').'"></i>';
+				}
+				print '</td>';
+				if (isset($parameters['i']) && empty($parameters['i'])) {
+					$parameters['totalarray']['nbfield']++;
+				}
 			}
 
-			// syncstatus
-			$currentStatusDetails = $obj->pdp_syncstatus ? $pdpConnectFr->getStatusLabel($obj->pdp_syncstatus) : '-';
-			print '<td class="center tdoverflowmax125" title="'.dolPrintHTMLForAttribute($currentStatusDetails).'">';
-			print $currentStatusDetails;
-			print '</td>';
-			if (isset($parameters['i']) && empty($parameters['i'])) {
-				$parameters['totalarray']['nbfield']++;
+			// Sync status
+			if (empty($parameters['arrayfields']['pdp_syncstatus']) || !empty($parameters['arrayfields']['pdp_syncstatus']['checked'])) {
+				$currentStatusDetails = $obj->pdp_syncstatus ? $pdpConnectFr->getStatusLabel($obj->pdp_syncstatus) : '-';
+				print '<td class="center tdoverflowmax125" title="'.dolPrintHTMLForAttribute($currentStatusDetails).'">';
+				print $currentStatusDetails;
+				print '</td>';
+				if (isset($parameters['i']) && empty($parameters['i'])) {
+					$parameters['totalarray']['nbfield']++;
+				}
 			}
 		}
 
@@ -844,7 +955,7 @@ class ActionsPdpconnectfr extends CommonHookActions
 	 * @param string		 		$action			Code action
 	 * @param Hookmanager			$hookmanager	Hookmanager
 	 * @return int									Result
-		 */
+	 */
 	public function isEditable($parameters, &$object, &$action, $hookmanager)
 	{
 		global $langs, $db;

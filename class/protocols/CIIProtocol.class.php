@@ -256,29 +256,9 @@ class CIIProtocol extends AbstractProtocol
 	 */
 	public function generateXML($invoice, $outputlangs = null)
 	{
-		// $doc = new \DOMDocument('1.0', 'UTF-8');
+		// TODO
+		// Can reuse the generateXML() of FactureXProtocol.
 
-		// $root = $doc->createElementNS(
-		// 	'urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100',
-		// 	'rsm:CrossIndustryInvoice'
-		// );
-
-		// $doc->appendChild($root);
-
-		// $exchanged = $doc->createElement('rsm:ExchangedDocument');
-		// $root->appendChild($exchanged);
-
-		// if (!empty($data['documentno'])) {
-		// 	$el = $doc->createElement('ram:ID', htmlspecialchars($data['documentno']));
-		// 	$exchanged->appendChild($el);
-		// }
-
-		// if (!empty($data['documenttypecode'])) {
-		// 	$el = $doc->createElement('ram:TypeCode', $data['documenttypecode']);
-		// 	$exchanged->appendChild($el);
-		// }
-
-		// return $doc->saveXML();
 		return 'NOTIMPLEMENTED';
 	}
 
@@ -321,15 +301,15 @@ class CIIProtocol extends AbstractProtocol
 
 	/**
 	 * Create a supplier invoice from a CII file and attach the file (and readable file if exists) to the document.
+	 * This may create the Supplier and the Product depending on setup.
 	 *
 	 * @param  string 			$file                       		Source string file. We use this file to get data of supplier invoice.
 	 * @param  string|null 		$ReadableViewFile        			Readable view file (PDP Generated readable PDF).e only store it if available.
 	 * @param  string 			$flowId                       		Flow identifier source of the invoice.
-	 * @return array{res:int, message:string, action:string|null}   Returns array with 'res' (1 on success, 0 already exists, -1 on failure) with a 'message' and an optional 'action'.
+	 * @return array{res:int, message:string, actioncode: string|null, actionurl: string|null, action:string|null}   Returns array with 'res' (1 on success, 0 already exists, -1 on failure) with a 'message' and an optional 'actioncode' and 'action'.
 	 */
 	public function createSupplierInvoiceFromSource($file, $ReadableViewFile = null, $flowId = '')
 	{
-
 		global $conf, $db, $user;
 
 		$pdpconnectfr = new PdpConnectFr($db);
@@ -409,9 +389,9 @@ class CIIProtocol extends AbstractProtocol
 		$syncSocRes = $this->_syncOrCreateThirdpartyFromEInvoiceSeller($parsedHeader, 'dolibarr', $flowId);
 		$socId = $syncSocRes['res'];
 		$return_messages[] = $syncSocRes['message'];
-		$action = $syncSocRes['action'] ?? null;
 		if ($socId < 0) {
-			return ['res' => -1, 'message' => 'Thirdparty sync or creation error: ' . implode("\n", $return_messages), 'action' => $action];
+			return ['res' => -1, 'message' => 'Thirdparty sync or creation error: ' . implode("\n", $return_messages),
+			'actioncode' => $syncSocRes['actioncode'] ?? '', 'actionurl' => $syncSocRes['actionurl'] ?? '', 'action' => $syncSocRes['action'] ?? null];
 		}
 
 		// Load supplier (thirdparty)
@@ -568,7 +548,8 @@ class CIIProtocol extends AbstractProtocol
 				// Sync or create product
 				$res = $this->_findOrCreateProductFromEinvoiceLine($parsedLine, $flowId);
 				if ($res['res'] < 0) {
-					return ['res' => -1, 'message' => 'Product sync or creation error: ' . $res['message'], 'action' => $res['action'] ?? null];
+					return ['res' => -1, 'message' => 'Product sync or creation error: ' . $res['message'],
+					'actioncode' => $res['actioncode'] ?? '', 'actionurl' => $res['actionurl'] ?? '', 'action' => $res['action'] ?? null];
 				}
 				$productId = $res['res'];
 			}
@@ -1152,7 +1133,7 @@ class CIIProtocol extends AbstractProtocol
 	 * @param string    $priority Fill priority ('dolibarr' or 'pdp'). If both data are available, which one to prefer
 	 * @param string    $flowId Flow identifier source of the thirdparty.
 	 *
-	 * @return array{res:int, message:string, actioncode:string|null, actionurl:string|null, action:string|null}   Returns array with 'res' (ID of the synchronized or created thirdparty, -1 on error) with a 'message' and an optional 'action'.
+	 * @return array{res:int, message:string, actioncode:string|null, actionurl:string|null, action:string|null}   Returns array with 'res' (ID of the synchronized or created thirdparty, -1 on error) with a 'message' and an optional 'actioncode', 'actionurl', and 'action'.
 	 */
 	private function _syncOrCreateThirdpartyFromEInvoiceSeller($sellerInfo, $priority = 'dolibarr', $flowId = '')
 	{
@@ -1459,10 +1440,10 @@ class CIIProtocol extends AbstractProtocol
 				$errorDetails[] = 'Email: ' . $selleremail;
 			}
 			if (!empty($selleridents)) {
-				$errorDetails[] = 'Identifiers: ' . implode(', ', $selleridents);
+				$errorDetails[] = 'ID: ' . implode(', ', $selleridents);
 			}
 
-			$detailsStr = !empty($errorDetails) ? ' (' . implode(' | ', $errorDetails) . ')' : '';
+			$detailsStr = !empty($errorDetails) ? ' [' . implode(' - ', $errorDetails) . ']' : '';
 
 			$message = 'Unable to find supplier' . $detailsStr . '. Auto-creation of thirdparties is disabled in settings.';
 
@@ -1594,6 +1575,7 @@ class CIIProtocol extends AbstractProtocol
 		$sql .= " INNER JOIN " . MAIN_DB_PREFIX . "product_fournisseur_price as pfp ON pfp.fk_product = p.rowid ";
 		$sql .= " WHERE pfp.product_supplier_id = '" . $db->escape($lineData['prodsellerid']) . "' ";
 		$sql .= " AND pfp.fk_soc = " . intval($lineData['supplierId']) . " ";
+		$sql .= " AND p.entity IN (".getEntity('product').")";
 		$sql .= " LIMIT 1";
 		$resql = $db->query($sql);
 		if ($resql && $db->num_rows($resql) > 0) {
@@ -1608,8 +1590,9 @@ class CIIProtocol extends AbstractProtocol
 
 		// if Buyer Reference (prodbuyerid) is available search prodbuyerid = internal product reference
 		if (!empty($lineData['prodbuyerid'])) {
-			$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product ";
+			$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product";
 			$sql .= " WHERE ref = '" . $db->escape($lineData['prodbuyerid']) . "' OR rowid = '" . $db->escape($lineData['prodbuyerid']) . "' ";
+			$sql .= " AND entity IN (".getEntity('product').")";
 			$sql .= " LIMIT 1";
 			$resql = $db->query($sql);
 			if ($resql && $db->num_rows($resql) > 0) {
@@ -1621,8 +1604,9 @@ class CIIProtocol extends AbstractProtocol
 
 		// Check with EI- prefix for product inmported using prodsellerid as internal reference with EI- prefix
 		if (!empty($lineData['prodsellerid']) && $lineData['prodsellerid'] !== "0000") {
-			$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product ";
+			$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product";
 			$sql .= " WHERE ref = 'EI-" . $db->escape($lineData['prodsellerid']) . "'";
+			$sql .= " AND entity IN (".getEntity('product').")";
 			$sql .= " LIMIT 1";
 			$resql = $db->query($sql);
 			if ($resql && $db->num_rows($resql) > 0) {
@@ -1633,8 +1617,9 @@ class CIIProtocol extends AbstractProtocol
 		}
 
 		// Text Search using prodname
-		$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product ";
-		$sql .= " WHERE label = '" . $db->escape($lineData['prodname']) . "' ";
+		$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "product";
+		$sql .= " WHERE label = '" . $db->escape($lineData['prodname']) . "'";
+		$sql .= " AND entity IN (".getEntity('product').")";
 		$resql = $db->query($sql);
 		if ($resql) {
 			if ($db->num_rows($resql) === 1) {
@@ -1679,7 +1664,8 @@ class CIIProtocol extends AbstractProtocol
 				$productId = $product->id;
 
 				// Set import_key
-				$sql = 'UPDATE ' . MAIN_DB_PREFIX . "product SET import_key = '" . $db->escape($product->import_key) . "' WHERE rowid = " . ((int) $productId);
+				$sql = "UPDATE " . MAIN_DB_PREFIX . "product SET import_key = '" . $db->escape($product->import_key) . "'";
+				$sql .= " WHERE rowid = " . ((int) $productId);
 				$db->query($sql);
 
 				// Add entry in pdpconnectfr_extlinks table to mark product as created from e-invoice
@@ -1688,7 +1674,7 @@ class CIIProtocol extends AbstractProtocol
 				dol_syslog(__METHOD__ . ' New product created (ID: ' . $productId . ')');
 				return [
 					'res' => $productId,
-					'message' => 'Product successfully created from E-invoice synchronization',
+					'message' => 'Product successfully created from E-invoice import',
 				];
 			}
 
@@ -1699,6 +1685,7 @@ class CIIProtocol extends AbstractProtocol
 				'message' => 'Product creation error: ' . $product->error,
 			];
 		} else {
+			// Suggest manual creation of product
 			dol_syslog(get_class($this) . '::_findOrCreateProductFromEinvoiceLine Auto-creation of products is disabled', LOG_ERR);
 
 			$prodRef = trim($lineData['prodsellerid'] ?? '');
@@ -1708,7 +1695,10 @@ class CIIProtocol extends AbstractProtocol
 			$errorDetails = [];
 			$createParams = [];
 			if (!empty($prodRef) && $prodRef !== "0000") {
-				$errorDetails[] = $prodRef . " | ";
+				$errorDetails[] = $prodRef;
+
+				$createParams['ref'] = 'EI-' . dol_sanitizeFileName(!empty($lineData['prodsellerid'] && $lineData['prodsellerid'] !== "0000") ? $lineData['prodsellerid'] : uniqid());
+
 				$createParams['ref_ext'] = $prodRef;
 			}
 			if (!empty($prodName)) {
@@ -1738,7 +1728,7 @@ class CIIProtocol extends AbstractProtocol
 			}
 			$createUrl .= '&backtopage=' . urlencode(dol_buildpath('/pdpconnectfr/document_list.php', 1));
 
-			$detailsStr = !empty($errorDetails) ? ' (' . implode(' | ', $errorDetails) . ')' : '';
+			$detailsStr = !empty($errorDetails) ? ' [' . implode(' - ', $errorDetails) . ']' : '';
 
 			$message = 'Unable to find product' . $detailsStr . '. Auto-creation of products is disabled in settings.';
 
@@ -1751,7 +1741,7 @@ class CIIProtocol extends AbstractProtocol
 			return array(
 				'res' => -1,
 				'message' => $message,
-				'actioncode' => 'PROUCT_NOT_FOUND',
+				'actioncode' => 'PRODUCT_NOT_FOUND',
 				'actionurl' => $createUrl,
 				'action' => $action
 			);

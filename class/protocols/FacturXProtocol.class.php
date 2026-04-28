@@ -1360,6 +1360,7 @@ class FacturXProtocol extends AbstractProtocol
 
 	/**
 	 * Create a supplier invoice from a Factur-X file and attach the file (and readable file if exists)to the document.
+	 * This may create the Supplier and the Product depending on setup.
 	 *
 	 * @param  string 			$file                       		Source string file. We use this file to get data of supplier invoice.
 	 * @param  string|null 		$ReadableViewFile        			Readable view file (PDP Generated readable PDF).e only store it if available.
@@ -1412,7 +1413,7 @@ class FacturXProtocol extends AbstractProtocol
 
 		$parsedHeader = [];
 		$parsedLines = [];
-		if (!empty(getDolGlobalInt('PDPCONNECTFR_USE_CII_READER_FOR_FACTURX'))) {
+		if (!empty(getDolGlobalInt('PDPCONNECTFR_USE_CII_READER_FOR_FACTURX'))) {	// Option to use the CII native XML parrser instead of the Zugferd parser
 			dol_include_once('pdpconnectfr/class/protocols/ProtocolManager.class.php');
 			$ProtocolManager = new ProtocolManager($db);
 			$CII = $ProtocolManager->getProtocol('CII');
@@ -1630,9 +1631,9 @@ class FacturXProtocol extends AbstractProtocol
 		$syncSocRes = $this->_syncOrCreateThirdpartyFromFacturXSeller($parsedHeader, 'dolibarr', $flowId);
 		$socId = $syncSocRes['res'];
 		$return_messages[] = $syncSocRes['message'];
-		$action = $syncSocRes['action'] ?? null;
 		if ($socId < 0) {
-			return ['res' => -1, 'message' => 'Thirdparty sync or creation error: ' . implode("\n", $return_messages), 'action' => $action];
+			return ['res' => -1, 'message' => 'Thirdparty sync or creation error: ' . implode("\n", $return_messages),
+			'actioncode' => $syncSocRes['actioncode'] ?? '', 'actionurl' => $syncSocRes['actionurl'] ?? '', 'action' => $syncSocRes['action'] ?? null];
 		}
 
 		// Load supplier (thirdparty)
@@ -1789,7 +1790,8 @@ class FacturXProtocol extends AbstractProtocol
 				// Sync or create product
 				$res = $this->_findOrCreateProductFromFacturXLine($parsedLine, $flowId);
 				if ($res['res'] < 0) {
-					return ['res' => -1, 'message' => 'Product sync or creation error: ' . $res['message'], 'action' => $res['action'] ?? null];
+					return ['res' => -1, 'message' => 'Product sync or creation error: ' . $res['message'],
+					'actioncode' => $res['actioncode'] ?? '', 'actionurl' => $res['actionurl'] ?? '', 'action' => $res['action'] ?? null];
 				}
 				$productId = $res['res'];
 			}
@@ -1973,9 +1975,9 @@ class FacturXProtocol extends AbstractProtocol
 				$res = $this->_saveFacturXFileToSupplierInvoiceAttachment($supplierInvoice, $tempFile);
 
 				if ($res['res'] < 0) {
-					$return_messages[] = 'Failed to save Factur-X file as attachment: ' . $res['message'];
+					$return_messages[] = 'Failed to save Einvoice file as attachment: ' . $res['message'];
 				} else {
-					$return_messages[] = 'Factur-X file saved as attachment';
+					$return_messages[] = 'Einvoice file saved as attachment';
 				}
 			} else {
 				dol_syslog("Temporary 'converted pdf file' not found for attachment", LOG_ERR);
@@ -2388,7 +2390,7 @@ class FacturXProtocol extends AbstractProtocol
 	 * @param string    $priority Fill priority ('dolibarr' or 'pdp'). If both data are available, which one to prefer
 	 * @param string    $flowId Flow identifier source of the thirdparty.
 	 *
-	 * @return array{res:int, message:string, actioncode:string|null, actionurl:string|null, action:string|null}   Returns array with 'res' (ID of the synchronized or created thirdparty, -1 on error) with a 'message' and an optional 'action'.
+	 * @return array{res:int, message:string, actioncode:string|null, actionurl:string|null, action:string|null}   Returns array with 'res' (ID of the synchronized or created thirdparty, -1 on error) with a 'message' and an optional 'actioncode', 'actionurl', and 'action'.
 	 */
 	private function _syncOrCreateThirdpartyFromFacturXSeller($sellerInfo, $priority = 'dolibarr', $flowId = '')
 	{
@@ -2695,10 +2697,10 @@ class FacturXProtocol extends AbstractProtocol
 				$errorDetails[] = 'Email: ' . $selleremail;
 			}
 			if (!empty($selleridents)) {
-				$errorDetails[] = 'Identifiers: ' . implode(', ', $selleridents);
+				$errorDetails[] = 'ID: ' . implode(', ', $selleridents);
 			}
 
-			$detailsStr = !empty($errorDetails) ? ' (' . implode(' | ', $errorDetails) . ')' : '';
+			$detailsStr = !empty($errorDetails) ? ' [' . implode(' - ', $errorDetails) . ']' : '';
 
 			$message = 'Unable to find supplier' . $detailsStr . '. Auto-creation of thirdparties is disabled in settings.';
 
@@ -2758,6 +2760,7 @@ class FacturXProtocol extends AbstractProtocol
 
 		$pdpconnectfr = new PdpConnectFr($db);
 
+
 		// Search in product supplier prices table using prodsellerid
 		$sql = "SELECT p.rowid ";
 		$sql .= " FROM " . MAIN_DB_PREFIX . "product as p ";
@@ -2814,8 +2817,13 @@ class FacturXProtocol extends AbstractProtocol
 			}
 		}
 
-		// If no match found after all steps: Create new product
+		// If not found, we check by using the default product ID on thirdpary level
+		// TODO
+
+
+		// If no match found after all steps
 		if (!empty(getDolGlobalInt('PDPCONNECTFR_PRODUCTS_AUTO_GENERATION'))) {
+			// Auto-create prouct
 			$product = new Product($db);
 			$product->type        = $this->_detectProductTypeFromFacturx($lineData);
 			$product->ref = 'EI-' . dol_sanitizeFileName(!empty($lineData['prodsellerid'] && $lineData['prodsellerid'] !== "0000") ? $lineData['prodsellerid'] : uniqid());
@@ -2827,7 +2835,7 @@ class FacturXProtocol extends AbstractProtocol
 			$product->tva_tx      = (float) ($lineData['rateApplicablePercent'] ?? 0);
 			$product->status      = 0; // Status not to sell
 			$product->status_buy  = 1; // Status to buy
-			$product->note_private = 'Product created automatically from Factur-X import.';
+			$product->note_private = 'Product created automatically from E-invoice import.';
 			$product->import_key  = AbstractPDPProvider::$PDPCONNECTFR_LAST_IMPORT_KEY; // It does not work here, so we will update it after creation
 			// Set barcode if global ID is provided and is a GTIN/EAN type
 			if (!empty($lineData['prodglobalid']) && !empty($lineData['prodglobalidtype']) && in_array($lineData['prodglobalidtype'], ['0160', '0011'])) {
@@ -2858,7 +2866,7 @@ class FacturXProtocol extends AbstractProtocol
 				dol_syslog(__METHOD__ . ' New product created (ID: ' . $productId . ')');
 				return [
 					'res'     => $productId,
-					'message' => 'Product successfully created from Factur-X import',
+					'message' => 'Product successfully created from E-invoice import',
 				];
 			}
 
@@ -2869,6 +2877,7 @@ class FacturXProtocol extends AbstractProtocol
 				'message' => 'Product creation error: ' . $product->error,
 			];
 		} else {
+			// Suggest manual creation of product
 			dol_syslog(get_class($this) . '::_findOrCreateProductFromFacturXLine Auto-creation of products is disabled', LOG_ERR);
 
 			$prodRef = trim($lineData['prodsellerid'] ?? '');
@@ -2878,7 +2887,10 @@ class FacturXProtocol extends AbstractProtocol
 			$errorDetails = [];
 			$createParams = [];
 			if (!empty($prodRef) && $prodRef !== "0000") {
-				$errorDetails[] = $prodRef . " | ";
+				$errorDetails[] = $prodRef;
+
+				$createParams['ref'] = 'EI-' . dol_sanitizeFileName(!empty($lineData['prodsellerid'] && $lineData['prodsellerid'] !== "0000") ? $lineData['prodsellerid'] : uniqid());
+
 				$createParams['ref_ext'] = $prodRef;
 			}
 			if (!empty($prodName)) {
@@ -2908,7 +2920,7 @@ class FacturXProtocol extends AbstractProtocol
 			}
 			$createUrl .= '&backtopage=' . urlencode(dol_buildpath('/pdpconnectfr/document_list.php', 1));
 
-			$detailsStr = !empty($errorDetails) ? ' (' . implode(' | ', $errorDetails) . ')' : '';
+			$detailsStr = !empty($errorDetails) ? ' [' . implode(' - ', $errorDetails) . ']' : '';
 
 			$message = 'Unable to find product' . $detailsStr . '. Auto-creation of products is disabled in settings.';
 
@@ -2921,7 +2933,7 @@ class FacturXProtocol extends AbstractProtocol
 			return array(
 				'res' => -1,
 				'message' => $message,
-				'actioncode' => 'PROUCT_NOT_FOUND',
+				'actioncode' => 'PRODUCT_NOT_FOUND',
 				'actionurl' => $createUrl,
 				'action' => $action
 			);

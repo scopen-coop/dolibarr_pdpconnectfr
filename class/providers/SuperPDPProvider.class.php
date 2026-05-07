@@ -62,14 +62,14 @@ class SuperPDPProvider extends AbstractPDPProvider
 		parent::__construct($db);
 
 		$this->config = array(
-			'provider_url' => 'https://superpdp.tech/',
+			'provider_url'  => 'https://superpdp.tech/',
 			'prod_auth_url' => 'https://api.superpdp.tech/oauth2/',
 			'test_auth_url' => 'https://api.superpdp.tech/oauth2/',
-			'prod_api_url' => 'https://api.superpdp.tech/afnor-flow/v1/',
-			'test_api_url' => 'https://api.superpdp.tech/afnor-flow/v1/',
-			'client_id' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_ID'),
-			'client_secret' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_SECRET'),
-			'dol_prefix' => getDolGlobalString('PDPCONNECTFR_PDP') == 'SUPERPDPViaPartner' ? 'PDPCONNECTFR_SUPERPDPVIAPARTNER' : 'PDPCONNECTFR_SUPERPDP',
+			'prod_api_url'  => 'https://api.superpdp.tech/afnor-flow/v1/',
+			'test_api_url'  => 'https://api.superpdp.tech/afnor-flow/v1/',
+			'client_id'     => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_ID'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : '')),
+			'client_secret' => getDolGlobalString('PDPCONNECTFR_SUPERPDP_CLIENT_SECRET'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : '')),
+			'dol_prefix'    => getDolGlobalString('PDPCONNECTFR_PDP') == 'SUPERPDPViaPartner' ? 'PDPCONNECTFR_SUPERPDPVIAPARTNER' : 'PDPCONNECTFR_SUPERPDP',
 			'live' => getDolGlobalInt('PDPCONNECTFR_LIVE', 0)
 		);
 
@@ -137,11 +137,12 @@ class SuperPDPProvider extends AbstractPDPProvider
 
 				if (empty($tokenData['token'])) {
 					$this->helpToGetCredentials = str_replace('{s1}', '<br><br><center>' . img_picto('', 'url', 'class="pictofixedwidth"') . '<a href="' . $urltogeneratetoken . '" target="_new">' . $urltoshow . '</a></center>', $this->helpToGetCredentials);
-					$this->helpToGetCredentials = '<div class="formborder">' . $this->helpToGetCredentials . '</div>';
+					$this->helpToGetCredentials = '<div class="formborderx info">' . $this->helpToGetCredentials . '</div>';
 				} else {
 					$this->helpToGetCredentials = '<div class="green greenborder">';
 					$this->helpToGetCredentials .= '<center>';
 					$this->helpToGetCredentials .= $langs->trans("YourSoftwareSeemsConnectedWith", strtoupper($this->name));
+					$this->helpToGetCredentials .= ' <a href="'.$this->config['provider_url'].'" target="_blank">('.$this->config['provider_url'].')</a>';
 					$this->helpToGetCredentials .= '<br><br>' . img_picto('', 'delete', 'class="pictofixedwidth"') . '<a href="' . $_SERVER["PHP_SELF"] . '?action=delete' . $prefix . "TOKEN&token=" . newToken() . '">' . $langs->trans("ClickHereToRemoveConnection") . '</a>';
 					$this->helpToGetCredentials .= '</center>';
 					$this->helpToGetCredentials .= '</div>';
@@ -169,11 +170,12 @@ class SuperPDPProvider extends AbstractPDPProvider
 				$this->helpToGetCredentials = str_replace('{s4}', $langs->transnoentitiesnoconv("OAUTH_SECRET"), $this->helpToGetCredentials);
 				$this->helpToGetCredentials = str_replace('{s5}', $langs->transnoentitiesnoconv("Save"), $this->helpToGetCredentials);
 
-				$this->helpToGetCredentials = '<div class="formborder">' . $this->helpToGetCredentials . '</div>';
+				$this->helpToGetCredentials = '<div class="formborderx info">' . $this->helpToGetCredentials . '</div>';
 			} else {
 				$this->helpToGetCredentials = '<div class="green greenborder">';
 				$this->helpToGetCredentials .= '<center>';
 				$this->helpToGetCredentials .= $langs->trans("YourSoftwareSeemsConnectedWith", strtoupper($this->name));
+				$this->helpToGetCredentials .= ' <a href="'.$this->config['provider_url'].'" target="_blank">('.$this->config['provider_url'].')</a>';
 				$this->helpToGetCredentials .= '<br><br>' . img_picto('', 'delete', 'class="pictofixedwidth"') . '<a href="' . $_SERVER["PHP_SELF"] . '?action=delete' . $prefix . "TOKEN&token=" . newToken() . '">' . $langs->trans("ClickHereToRemoveConnection") . '</a>';
 				$this->helpToGetCredentials .= '</center>';
 				$this->helpToGetCredentials .= '</div>';
@@ -207,18 +209,18 @@ class SuperPDPProvider extends AbstractPDPProvider
 
 		if (getDolGlobalString('PDPCONNECTFR_PDP') != 'SUPERPDPViaPartner' || getDolGlobalString('PDPCONNTECTFR_SUPERPDP_VIAPARTNER') == 'proxy') {
 			// Username
-			$item = $formSetup->newItem($prefix . 'CLIENT_ID');
-			$item->nameText = $langs->trans('OAUTH_ID');
+			$item = $formSetup->newItem($prefix.'CLIENT_ID'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''));
+			$item->nameText = $langs->trans('PDPCONNECTFR_CLIENT_ID');
 			$item->cssClass = 'minwidth500';
 
 			// Password
-			$item = $formSetup->newItem($prefix . 'CLIENT_SECRET')->setAsGenericPassword();
-			$item->nameText = $langs->trans('OAUTH_SECRET');
+			$item = $formSetup->newItem($prefix.'CLIENT_SECRET'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''))->setAsGenericPassword();
+			$item->nameText = $langs->trans('PDPCONNECTFR_CLIENT_SECRET');
 			$item->cssClass = 'minwidth500';
 		}
 
 		// API_KEY
-		//$item = $formSetup->newItem($prefix . 'API_KEY');
+		//$item = $formSetup->newItem($prefix . 'API_KEY'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''));
 		//$item->cssClass = 'minwidth500';
 
 		// Token
@@ -230,13 +232,13 @@ class SuperPDPProvider extends AbstractPDPProvider
 					$texttoshow = $langs->trans('generateAccessToken') . ' via ' . getDolGlobalString("PDPCONNTECTFR_SUPERPDP_VIAPARTNER");
 					$urltogeneratetoken = getDolGlobalString('PDPCONNTECTFR_SUPERPDP_VIAPARTNER_OAUTH_URL');
 					$urltogeneratetoken .= '?state=none&response_type=code&redirect_uri=' . urlencode(dol_buildpath('/pdpconnectfr/admin/setup.php', 2));
-				} elseif (getDolGlobalString($prefix . 'CLIENT_ID') && getDolGlobalString($prefix . 'CLIENT_SECRET')) {
+				} elseif (getDolGlobalString($prefix . 'CLIENT_ID'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : '')) && getDolGlobalString($prefix . 'CLIENT_SECRET'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''))) {
 					$texttoshow = $langs->trans('generateAccessToken');
 					$urltogeneratetoken = $_SERVER["PHP_SELF"] . "?action=set" . $prefix . "TOKEN&token=" . newToken();
 				}
 
 				if ($urltogeneratetoken && (getDolGlobalString('PDPCONNECTFR_PDP') != 'SUPERPDPViaPartner' || !empty($tokenData['token']))) {
-					$item = $formSetup->newItem($prefix . 'TOKEN');
+					$item = $formSetup->newItem($prefix . 'TOKEN'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''));
 					$item->nameText = $langs->trans('AccessToken');
 					$item->cssClass = 'maxwidth500 ';
 					$item->fieldOverride = "";
@@ -271,7 +273,11 @@ class SuperPDPProvider extends AbstractPDPProvider
 					$item->cssClass = 'minwidth500';
 
 					if ($tokenData['token'] && getDolGlobalString('PDPCONNECTFR_PROTOCOL')) {
-						$item->fieldOverride .= '<a class="reposition" href="' . $_SERVER["PHP_SELF"] . "?action=make" . $prefix . "sampleinvoice&token=" . newToken() . '"><i class="fa fa-file pictofixedwidth"></i>' . $langs->trans('generateSendSampleInvoice') . '</a><br>';
+						if (getDolGlobalString('PDPCONNECTFR_LIVE')) {
+							$item->fieldOverride .= '<span class="opacitymedium" title="'.$langs->trans("DisabledInProductionMode").'"><i class="fa fa-file pictofixedwidth"></i>' . $langs->trans('generateSendSampleInvoice') . '</span><br>';
+						} else {
+							$item->fieldOverride .= '<a class="reposition" href="' . $_SERVER["PHP_SELF"] . "?action=make" . $prefix . "sampleinvoice&token=" . newToken() . '"><i class="fa fa-file pictofixedwidth"></i>' . $langs->trans('generateSendSampleInvoice') . '</a><br>';
+						}
 					}
 
 					// Check your ID in French E-Invoice Annuary
@@ -905,19 +911,21 @@ class SuperPDPProvider extends AbstractPDPProvider
 		foreach ($flowIds as $flowId) {
 			$escapedFlowIds[] = "'" . $db->escape($flowId) . "'";
 		}
-		$sql = "SELECT flow_id FROM " . MAIN_DB_PREFIX . "pdpconnectfr_document";
-		$sql .= " WHERE flow_id IN (" . implode(',', $escapedFlowIds) . ")";
-		$resql = $db->query($sql);
-		if ($resql) {
-			while ($obj = $db->fetch_object($resql)) {
-				$alreadyProcessedFlowIds[$obj->flow_id] = $obj->flow_id;
-			}
-		} else {
-			$this->errors[] = "Failed to retrieve flows already processed among the list of flows received.";
-			$results_messages[] = "Failed to retrieve flows already processed among the list of flows received.";
+		if (count($escapedFlowIds)) {
+			$sql = "SELECT flow_id FROM " . MAIN_DB_PREFIX . "pdpconnectfr_document";
+			$sql .= " WHERE flow_id IN (" . implode(',', $escapedFlowIds) . ")";
+			$resql = $db->query($sql);
+			if ($resql) {
+				while ($obj = $db->fetch_object($resql)) {
+					$alreadyProcessedFlowIds[$obj->flow_id] = $obj->flow_id;
+				}
+			} else {
+				$this->errors[] = "Failed to retrieve the list of flows already processed from database. ".$this->db->lasterror();
+				$results_messages[] = "Failed to retrieve the list of flows already processed from database. ".$this->db->lasterror();
 
-			dol_syslog(__METHOD__ . " Failed to retrieve flows already processed among the list of flows received.", LOG_DEBUG, 0, "_pdpconnectfr");
-			return array('res' => 0, 'messages' => $results_messages);
+				dol_syslog(__METHOD__ . " Failed to retrieve flows already processed among the list of flows received. ".$this->db->lasterror(), LOG_DEBUG, 0, "_pdpconnectfr");
+				return array('res' => 0, 'messages' => $results_messages);
+			}
 		}
 
 		// Update totalFlows after filtering

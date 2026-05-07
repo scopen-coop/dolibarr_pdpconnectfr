@@ -135,9 +135,14 @@ foreach ($protocolsList as $key => $protocolconfig) {
  * Actions
  */
 
-// Set FACTURX as the default protocol when no default value is specified
-if (!getDolGlobalString('PDPCONNECTFR_PROTOCOL')) {
-	dolibarr_set_const($db, 'PDPCONNECTFR_PROTOCOL', 'FACTURX', 'chaine', 0, '', $conf->entity);
+// Set the default protocol when no default value is specified
+if (getDolGlobalString('PDPCONNECTFR_PDP') && !getDolGlobalString('PDPCONNECTFR_PROTOCOL')) {
+	if (getDolGlobalString('PDPCONNECTFR_PDP') == 'ESALINK') {
+		// Default protocol for ESALINK is Factur-x. TODO Change to CII ?
+		dolibarr_set_const($db, 'PDPCONNECTFR_PROTOCOL', 'FACTURX', 'chaine', 0, '', $conf->entity);
+	} else {
+		dolibarr_set_const($db, 'PDPCONNECTFR_PROTOCOL', 'CII', 'chaine', 0, '', $conf->entity);
+	}
 	header("Location: ".$_SERVER["PHP_SELF"]);
 	exit;
 }

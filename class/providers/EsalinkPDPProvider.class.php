@@ -168,7 +168,7 @@ class EsalinkPDPProvider extends AbstractPDPProvider
 
 		// Token
 		if (getDolGlobalString($prefix . 'API_KEY'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''))) {
-			$texttoshow = $langs->trans('generateAccessToken');
+			$texttoshow = $langs->trans('ConnectTo').' ('.$langs->trans('generateAccessToken').')';
 			$urltogeneratetoken = $_SERVER["PHP_SELF"] . "?action=set" . $prefix . "TOKEN&token=" . newToken();
 
 			$item = $formSetup->newItem($prefix . 'TOKEN'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''));

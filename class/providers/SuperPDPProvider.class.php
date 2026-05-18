@@ -229,11 +229,11 @@ class SuperPDPProvider extends AbstractPDPProvider
 				$texttoshow = '';
 				$urltogeneratetoken = '';
 				if (getDolGlobalString('PDPCONNECTFR_PDP') == 'SUPERPDPViaPartner' && getDolGlobalString("PDPCONNTECTFR_SUPERPDP_VIAPARTNER")) {
-					$texttoshow = $langs->trans('generateAccessToken') . ' via ' . getDolGlobalString("PDPCONNTECTFR_SUPERPDP_VIAPARTNER");
+					$texttoshow = $langs->trans('ConnectTo').' ('.$langs->trans('generateAccessToken') . ' via ' . getDolGlobalString("PDPCONNTECTFR_SUPERPDP_VIAPARTNER").')';
 					$urltogeneratetoken = getDolGlobalString('PDPCONNTECTFR_SUPERPDP_VIAPARTNER_OAUTH_URL');
 					$urltogeneratetoken .= '?state=none&response_type=code&redirect_uri=' . urlencode(dol_buildpath('/pdpconnectfr/admin/setup.php', 2));
 				} elseif (getDolGlobalString($prefix . 'CLIENT_ID'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : '')) && getDolGlobalString($prefix . 'CLIENT_SECRET'.(getDolGlobalInt('PDPCONNECTFR_LIVE') ? '_PROD' : ''))) {
-					$texttoshow = $langs->trans('generateAccessToken');
+					$texttoshow = $langs->trans('ConnectTo').' ('.$langs->trans('generateAccessToken').')';
 					$urltogeneratetoken = $_SERVER["PHP_SELF"] . "?action=set" . $prefix . "TOKEN&token=" . newToken();
 				}
 

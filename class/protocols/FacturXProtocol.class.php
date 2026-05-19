@@ -120,7 +120,7 @@ class FacturXProtocol extends AbstractProtocol
 		 * @var PdpConnectFr		$pdpconnectfr
 		 */
 
-
+		var_dump(getDolGlobalInt('PDPCONNECTFR_USE_EXTERNAL_FACTURX_BUILDER'));
 		if (!getDolGlobalInt('PDPCONNECTFR_USE_EXTERNAL_FACTURX_BUILDER')) {
 			// =====================================================================
 			// Use the CII protocol to generate the XML file
@@ -477,9 +477,9 @@ class FacturXProtocol extends AbstractProtocol
 		// Make a copy of the original PDF file
 		$pathfacturxpdf = $filedir . '/' . $filename . '_facturx.pdf';	// The new name of the PDF including xml
 		if (dol_copy($orig_pdf, $pathfacturxpdf)) {
-			dol_syslog(get_class($this) . "::executeHooks copied original PDF to " . $pathfacturxpdf);
+			dol_syslog(get_class($this) . "::generateInvoice copied original PDF to " . $pathfacturxpdf);
 		} else {
-			dol_syslog(get_class($this) . "::executeHooks failed to copy original PDF to " . $pathfacturxpdf, LOG_ERR);
+			dol_syslog(get_class($this) . "::generateInvoice failed to copy original PDF to " . $pathfacturxpdf, LOG_ERR);
 			$this->error = $langs->trans("ErrorFailToCopyFile", $orig_pdf, $pathfacturxpdf);
 			$this->errors[] = $this->error;
 			return -1;
@@ -509,7 +509,7 @@ class FacturXProtocol extends AbstractProtocol
 		// 2 methods are provided depending on the version of Dolibarr.
 		// TODO A third method can be tried using the atgp/factur-x library.
 
-		if ((float) DOL_VERSION < 24.0) {
+		if (class_exists('FPDF', false) && is_subclass_of('FPDF', 'TCPDF')) {
 			// Generate the PDF including the XML using the TCPDF library.
 			// Bugged version that include the factur-x.xml file twice in the PDF. Only Acrobat Reader show there is 2 files, other PDF reader works correctly showing one file.
 			// But it works with Esalink and is the only solution when Dolibarr < 24.0 because such version have a class FPDF provided by default in Dolibarr
@@ -593,7 +593,7 @@ class FacturXProtocol extends AbstractProtocol
 			dol_syslog(get_class($this) . '::generateInvoice cleaned up temporary XML file: ' . $xmlfile);
 		}
 
-		// Add factorx pdfgeneration hook
+		// Add afterEinvoiceCreation hook
 		global $action, $hookmanager;
 		$hookmanager->initHooks(array('einvoicegeneration'));
 		$parameters = array('protocol' => 'factur-x', 'file' => $orig_pdf, 'object' => $invoice, 'outputlangs' => $langs);
@@ -678,7 +678,6 @@ class FacturXProtocol extends AbstractProtocol
 		//$sellerglobalid = $pdpconnectfr->getSellerCommunicationURI(0);
 		$sellerglobalid = idprof($mysoc);
 
-
 		if ($mySchemeIdProf == "0002" && strlen($sellerid) != 9) {	// If einvoice ID is French SIREN, we check it has 9 chars.
 			throw new Exception('BADPROFID (generateSampleInvoiceOld): The professional ID ' . $sellerid . ' has type SIREN but length is not 9 characters. Fix this in your company or einvoice module setup page.');
 		}
@@ -717,11 +716,24 @@ class FacturXProtocol extends AbstractProtocol
 
 		$documentBuilder->setDocumentSellerAddress("Lieferantenstraße 20", "", "", "80333", "München", ZugferdCountryCodes::GERMANY);
 		$documentBuilder->setDocumentSellerContact("H. Müller", "", "+49-111-2222222", "+49-111-3333333", "hm@lieferant.de");
-		$documentBuilder->setDocumentSellerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'sales@lieferant.de');
+
+		//$documentBuilder->setDocumentSellerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'sales@lieferant.de');
+		$myUri             = $pdpconnectfr->getSellerCommunicationURI(0);			// Example "315143296_1939"
+		$mySchemeUri       = $this->getIEC6523Code($mysoc->country_code, 2);		// Example "0225"
+		$documentBuilder->setDocumentSellerCommunication($mySchemeUri, $myUri);
+
 		$documentBuilder->setDocumentBuyer("Kunden AG Mitte", "GE2020211");
 		$documentBuilder->setDocumentBuyerAddress("Kundenstraße 15", "", "", "69876", "Frankfurt", ZugferdCountryCodes::GERMANY);
 		$documentBuilder->setDocumentBuyerContact("H. Meier", "", "+49-333-4444444", "+49-333-5555555", "hm@kunde.de");
-		$documentBuilder->setDocumentBuyerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'purchase@kunde.de');
+
+		//$documentBuilder->setDocumentBuyerCommunication(ZugferdElectronicAddressScheme::UNECE3155_EM, 'purchase@kunde.de');
+		$buyerUri             = $pdpconnectfr->getBuyerCommunicationURI(null);		// Example "315143296_1940"
+		$buyerSchemeUri       = $this->getIEC6523Code($mysoc->country_code, 2);		// Example "0225"
+		if (empty($buyerUri)) {
+			$buyerUri = '315143296_1940';
+		}
+		$documentBuilder->setDocumentBuyerCommunication($buyerSchemeUri, $buyerUri);
+
 		$documentBuilder->setDocumentPayee('Kunden AG Zahlungsdienstleistung');
 		$documentBuilder->setDocumentBuyerOrderReferencedDocument("PO-2024-0003324");
 		$documentBuilder->setDocumentSellerOrderReferencedDocument('SO-2024-000993337');
@@ -932,24 +944,6 @@ class FacturXProtocol extends AbstractProtocol
 
 
 		require_once DOL_DOCUMENT_ROOT . '/societe/class/societe.class.php';
-		if ($thirdpartyBuyer instanceof Societe) {
-			$tmpthirdparty = $thirdpartyBuyer;
-		} else {
-			$tmpthirdparty = new Societe($this->db);
-			$tmpthirdparty->initAsSpecimen();
-			$tmpthirdparty->idprof1 = '000000001';
-			$tmpthirdparty->idprof2 = '00000000100010';
-			$tmpthirdparty->tva_intra = 'FR12000000001';
-		}
-		$tmpinvoice->thirdparty = $tmpthirdparty;
-		$tmpinvoice->socid = $tmpthirdparty->id;			// 0 for specimen
-
-		require_once DOL_DOCUMENT_ROOT . '/contact/class/contact.class.php';
-		$tmpcontact = new Contact($this->db);
-		$tmpcontact->initAsSpecimen();
-		$tmpcontact->socid = $tmpthirdparty->id;			// 0 for specimen
-		$tmpinvoice->contact = $tmpcontact;
-
 
 
 		// Set $mysoc if seller is a thirdparty when we want to generate a sample invoice for a purchase.
@@ -962,8 +956,35 @@ class FacturXProtocol extends AbstractProtocol
 
 			$mysoc = $thirdpartySeller;
 			$conf->global->PDPCONNECTFR_SUPERPDP_ROUTING_ID = idprof($thirdpartySeller);
+		} else {
+			$thirdpartySeller = $mysoc;
 		}
 		//var_dump(($savmysoc ? $savmysoc->name : ''), $mysoc->name, $thirdpartyBuyer->name);
+
+
+		if ($thirdpartyBuyer instanceof Societe) {
+			$tmpthirdparty = $thirdpartyBuyer;
+		} else {
+			$tmpthirdparty = new Societe($this->db);
+			$tmpthirdparty->initAsSpecimen();
+			if ($thirdpartySeller->idprof1 == "000000001") {
+				$tmpthirdparty->idprof1 = '000000002';
+				$tmpthirdparty->idprof2 = '00000000200010';
+				$tmpthirdparty->tva_intra = 'FR12000000002';
+			} else {
+				$tmpthirdparty->idprof1 = '000000001';
+				$tmpthirdparty->idprof2 = '00000000100010';
+				$tmpthirdparty->tva_intra = 'FR12000000001';
+			}
+		}
+		$tmpinvoice->thirdparty = $tmpthirdparty;
+		$tmpinvoice->socid = $tmpthirdparty->id;			// 0 for specimen
+
+		require_once DOL_DOCUMENT_ROOT . '/contact/class/contact.class.php';
+		$tmpcontact = new Contact($this->db);
+		$tmpcontact->initAsSpecimen();
+		$tmpcontact->socid = $tmpthirdparty->id;			// 0 for specimen
+		$tmpinvoice->contact = $tmpcontact;
 
 
 		// Generate the Dolibarr PDF of the invoice
@@ -1281,7 +1302,7 @@ class FacturXProtocol extends AbstractProtocol
 		if ($socId < 0) {
 			return [
 				'res' => -1,
-				'message' => 'Thirdparty sync or creation error: ' . implode("\n", $return_messages),
+				'message' => 'Thirdparty sync or creation error: ' . implode("<br>\n", $return_messages),
 				'actioncode' => $syncSocRes['actioncode'] ?? '',
 				'actionurl' => $syncSocRes['actionurl'] ?? '',
 				'action' => $syncSocRes['action'] ?? null,
@@ -1451,7 +1472,7 @@ class FacturXProtocol extends AbstractProtocol
 				if ($res['res'] < 0) {
 					return [
 						'res' => -1,
-						'message' => 'Product sync or creation error: ' . implode("\n", $return_messages),
+						'message' => 'Product sync or creation error: ' . implode("<br>\n", $return_messages),
 						'actioncode' => $res['actioncode'] ?? '',
 						'actionurl' => $res['actionurl'] ?? '',
 						'action' => $res['action'] ?? null,
@@ -1780,38 +1801,22 @@ class FacturXProtocol extends AbstractProtocol
 	}
 
 	/**
-	 * Get a timestamp and return a php DateTime object
+	 * Map document type code to Dolibarr invoice type
 	 *
-	 * @param	int		$ts			Timestamp
-	 * @return 	\DateTime|null 		DateTime object or null if $ts is empty
-	 */
-	private function _tsToDateTime($ts)
-	{
-		dol_syslog("facturx call _tsToDateTime for {$ts} ...");
-		if (empty($ts)) {
-			return null;
-		}
-		$dt = new \DateTime();
-		$dt->setTimestamp($ts);
-		return $dt;
-	}
-
-	/**
-	 * Map Factur-X document type code to Dolibarr invoice type
-	 *
-	 * @param string $documenttypecode Factur-X document type code
+	 * @param string $documenttypecode Document type code
 	 * @return int|string Dolibarr invoice type or '-1' if unknown
 	 */
 	private function _getDolibarrInvoiceType($documenttypecode)
 	{
 		/**
 		 * Codes UNTDID 1001 utilisés par EN16931 pour le type de facture (InvoiceTypeCode BT-3).
-		 * 325 – Facture pro-forma
+		 * 325 – Facture pro-forma (a ignorer, n'est pas une facture mais une commande)
 		 * 211 – Demande de paiement intermédiaire (une facture de situation?)
 		 * 386 – Facture d’acompte
-		 * 381 – Note de crédit
-		 * 384 – Facture corrective
+		 * 381 – Avoir / Note de crédit sur facture standard
+		 * 384 – Facture corrective / remplacement
 		 * 380 – Facture standard
+		 * 503 - Avoir / Note de crédit sur une facture d'acompte
 		 *
 		 * 80  – Note de débit (biens ou services) --- Not used in Dolibarr
 		 * 82  – Facture de services mesurés (ex : gaz, électricité) --- Not used in Dolibarr
@@ -1835,6 +1840,7 @@ class FacturXProtocol extends AbstractProtocol
 			ZugferdInvoiceType::CORRECTION                      => CommonInvoice::TYPE_REPLACEMENT,
 			ZugferdInvoiceType::CREDITNOTE                      => CommonInvoice::TYPE_CREDIT_NOTE,
 			ZugferdInvoiceType::PREPAYMENTINVOICE               => CommonInvoice::TYPE_DEPOSIT,
+			"503"                                               => CommonInvoice::TYPE_CREDIT_NOTE,
 		];
 
 

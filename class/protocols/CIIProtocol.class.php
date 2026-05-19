@@ -261,7 +261,7 @@ class CIIProtocol extends AbstractProtocol
 		global $conf, $user, $langs, $mysoc, $db;	// Used by the include
 
 
-		// Call page to generate the invoice
+		// Call page to generate the invoice variables ($invoiceData, ...)
 		include dol_buildpath('pdpconnectfr/lib/buildinvoicelines.inc.php');
 		/**
 		 * @var array<mixed,mixed> 	$invoiceData
@@ -370,7 +370,7 @@ class CIIProtocol extends AbstractProtocol
 			dol_syslog(get_class($this) . '::generateInvoice cleaned up temporary XML file: ' . $xmlfile);
 		}
 
-		// Add einvoice hook
+		// Add afterEinvoiceCreation hook
 		global $action, $hookmanager;
 		$hookmanager->initHooks(array('einvoicegeneration'));
 		$parameters = array('protocol' => 'cii', 'file' => $einvoice_path, 'object' => $invoice, 'outputlangs' => $langs);
@@ -457,27 +457,9 @@ class CIIProtocol extends AbstractProtocol
 
 
 		require_once DOL_DOCUMENT_ROOT . '/societe/class/societe.class.php';
-		if ($thirdpartyBuyer instanceof Societe) {
-			$tmpthirdparty = $thirdpartyBuyer;
-		} else {
-			$tmpthirdparty = new Societe($this->db);
-			$tmpthirdparty->initAsSpecimen();
-			$tmpthirdparty->idprof1 = '000000001';
-			$tmpthirdparty->idprof2 = '00000000100010';
-			$tmpthirdparty->tva_intra = 'FR12000000001';
-		}
-		$tmpinvoice->thirdparty = $tmpthirdparty;
-		$tmpinvoice->socid = $tmpthirdparty->id;			// 0 for specimen
-
-		require_once DOL_DOCUMENT_ROOT . '/contact/class/contact.class.php';
-		$tmpcontact = new Contact($this->db);
-		$tmpcontact->initAsSpecimen();
-		$tmpcontact->socid = $tmpthirdparty->id;			// 0 for specimen
-		$tmpinvoice->contact = $tmpcontact;
 
 
-
-		// Set $mysoc if seller is a thirdparty when we want to generate a sample invoice for a purchase.
+		// Set $mysoc if seller is not myself (when we want to generate a sample invoice for a purchase).
 		$keyforconst = 'PDPCONNECTFR_' . getDolGlobalString('PDPCONNECTFR_PDP') . '_ROUTING_ID';
 		$savmysoc = null;
 		$savPDPCONNECTFR_ROUTING_ID = null;
@@ -487,8 +469,39 @@ class CIIProtocol extends AbstractProtocol
 
 			$mysoc = $thirdpartySeller;
 			$conf->global->PDPCONNECTFR_SUPERPDP_ROUTING_ID = idprof($thirdpartySeller);
+		} else {
+			$thirdpartySeller = $mysoc;
 		}
 		//var_dump(($savmysoc ? $savmysoc->name : ''), $mysoc->name, $thirdpartyBuyer->name);
+
+
+		if ($thirdpartyBuyer instanceof Societe) {
+			$tmpthirdparty = $thirdpartyBuyer;
+		} else {
+			$tmpthirdparty = new Societe($this->db);
+			$tmpthirdparty->initAsSpecimen();
+			if ($thirdpartySeller->idprof1 == "000000001") {
+				// Example Burger Queen on SuperPDP Network
+				$tmpthirdparty->idprof1 = '000000002';
+				$tmpthirdparty->idprof2 = '00000000200010';
+				$tmpthirdparty->tva_intra = 'FR12000000002';
+				define('PDPCONNECT_FORCE_BUYER_EID', '315143296_1940');
+			} else {
+				// Example Tricatel on SuperPDP Network
+				$tmpthirdparty->idprof1 = '000000001';
+				$tmpthirdparty->idprof2 = '00000000100010';
+				$tmpthirdparty->tva_intra = 'FR12000000001';
+				define('PDPCONNECT_FORCE_BUYER_EID', '315143296_1939');
+			}
+		}
+		$tmpinvoice->thirdparty = $tmpthirdparty;
+		$tmpinvoice->socid = $tmpthirdparty->id;			// 0 for specimen
+
+		require_once DOL_DOCUMENT_ROOT . '/contact/class/contact.class.php';
+		$tmpcontact = new Contact($this->db);
+		$tmpcontact->initAsSpecimen();
+		$tmpcontact->socid = $tmpthirdparty->id;			// 0 for specimen
+		$tmpinvoice->contact = $tmpcontact;
 
 
 		// Generate the Dolibarr PDF of the invoice
@@ -543,7 +556,8 @@ class CIIProtocol extends AbstractProtocol
 	 */
 	public function generateSampleInvoiceOld($pdpconnectfr, $thirdpartySeller = null, $thirdpartyBuyer = null, $options = array())
 	{
-		return array('path' => '', 'ref' => ''); // Not yet implemented
+		// For CII protocol, the old sample method now use the new one.
+		return $this->generateSampleInvoice($pdpconnectfr, $thirdpartySeller, $thirdpartyBuyer, $options);
 	}
 
 
@@ -857,7 +871,7 @@ class CIIProtocol extends AbstractProtocol
 		// Add a note about PDP import ( TODO: add a hook or extrafields to store import details)
 		$supplierInvoice->note_private = "Imported from PDP";
 
-		// TODO : save AAB, PMD, PMT notes ( all notes are grouped into documentNotes)
+		// TODO : save AAB, PMD, PMT notes (all notes are grouped into documentNotes)
 
 		// Create the invoice
 		$supplierInvoiceId = $supplierInvoice->create($user);
@@ -1802,8 +1816,8 @@ class CIIProtocol extends AbstractProtocol
 		if (!empty($data[$prefix . 'CommunicationUriScheme']) && !empty($data[$prefix . 'CommunicationUri'])) {
 			$uri = $doc->createElement('ram:URIUniversalCommunication');
 			$node->appendChild($uri);
-			$uriid = $doc->createElement('ram:URIID', $data[$prefix . 'CommunicationUri']);
-			$uriid->setAttribute('schemeID', $data[$prefix . 'CommunicationUriScheme']);
+			$uriid = $doc->createElement('ram:URIID', $data[$prefix . 'CommunicationUri']);			// Example 315143296_1939
+			$uriid->setAttribute('schemeID', $data[$prefix . 'CommunicationUriScheme']);			// Example 0225
 			$uri->appendChild($uriid);
 		}
 
@@ -1843,11 +1857,10 @@ class CIIProtocol extends AbstractProtocol
 		return $tax;
 	}
 
-
 	/**
-	 * Map CII document type code to Dolibarr invoice type
+	 * Map document type code to Dolibarr invoice type
 	 *
-	 * @param string $documenttypecode CII document type code
+	 * @param string $documenttypecode Document type code
 	 * @return int|string Dolibarr invoice type or '-1' if unknown
 	 */
 	private function _getDolibarrInvoiceType($documenttypecode)

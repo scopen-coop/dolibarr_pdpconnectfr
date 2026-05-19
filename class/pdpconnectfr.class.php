@@ -1666,8 +1666,8 @@ class PdpConnectFr
 			$product_id = (string) $resFetchP;		// Can be 'idprod_123' (product id) or '456' (supplier ref id)
 		}
 
-		// En mode create uniquement : champ texte simple (le tiers n'est pas encore en base, aucune ligne de routage n'existe)
-		// En mode edit, on affiche directement le tableau de routage existant (bloc plus bas)
+		// In create mode only : we show a text input (the thirdparty is not yet in database, no routing line exists)
+		// In edit mode, we show the routing array
 		if ($mode == 'create') {
 			$resprints .= '<tr class="trpdpconnect_collapseseparator trrouting_id '.($expand_display ? '' : 'hidden').'">';
 			$resprints .= '<td class="">' . $form->textwithpicto($langs->trans("RoutingIdFieldShort"), $langs->trans("SpecificRoutingFieldHelp")) . '</td>';
@@ -1860,7 +1860,7 @@ class PdpConnectFr
 		if ($invoiceId > 0) {
 			$sql .= " AND element_id = " . ((int) $invoiceId);
 		} else {
-			$sql .= " AND syncref = '" . $this->db->escape($invoiceRef) . "'";
+			$sql .= " AND syncref = '" . $this->db->escape($invoiceRef) . "'";	// Using id is more reliable.
 		}
 
 		$resql = $this->db->query($sql);
@@ -1884,7 +1884,6 @@ class PdpConnectFr
 		}
 
 		// Fetch last status message from pdpconnectfr_lifecycle_msg table to get more details on current status of the invoice into the PDP system
-		$currentStatus = '-';
 		$sql = "SELECT lc_status, lc_reason_code FROM " . MAIN_DB_PREFIX . "pdpconnectfr_lifecycle_msg";
 		$sql .= " WHERE element_type = '" . $this->db->escape('facture') . "'";
 		$sql .= " AND element_id = " . (int) $invoiceId;
